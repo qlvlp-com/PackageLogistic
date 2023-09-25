@@ -15,7 +15,7 @@ namespace PackageLogistic
     {
         public const string GUID = "com.qlvlp.dsp.PackageLogistic";
         public const string NAME = "PackageLogistic";
-        public const string VERSION = "1.0";
+        public const string VERSION = "1.0.0";
 
         ConfigEntry<Boolean> autoSpray;
         ConfigEntry<Boolean> costProliferator;
@@ -357,9 +357,9 @@ namespace PackageLogistic
                             int[] items = new int[4] { 1000, 1116, 1120, 1121 };  // 水，硫酸，氢，重氢
                             if (items.Contains(grid.itemId) || LDB.veins.GetVeinTypeByItemId(grid.itemId) != EVeinType.None)
                             {
-                                if (grid.itemId == 1120 && grid.count < 0.5 * max_count)  // 防止氢堵塞原油分解分解
+                                if (grid.itemId == 1120 && grid.count < 0.60 * max_count)  // 为了防止氢和原油溢出，导致原油分解阻塞，氢和原油只允许储存60%
                                 {
-                                    deliveryPackage.grids[index].count = (int)(0.5 * max_count);
+                                    deliveryPackage.grids[index].count = (int)(0.60 * max_count);
                                 }
                                 else if (grid.itemId != 1120)
                                 {
@@ -379,8 +379,8 @@ namespace PackageLogistic
         }
 
 
-        //行星内物流运输站、星际物流运输站、大型采矿机
-        //物品数小于20%时从物流背包获取，大于25%时上传至物流背包
+        //行星内物流运输站、星际物流运输站
+        //当星际运输站本地物流和星际物流同时为供应时，向背包内投放物品，同时为需求时从背包内获取物品
         void ProcessTransport(object state)
         {
             Logger.LogDebug("ProcessTransport");
@@ -391,46 +391,51 @@ namespace PackageLogistic
                 foreach (StationComponent sc in pf.transport.stationPool)
                 {
                     if (sc == null || sc.id <= 0) { continue; }
-                    for (int i = sc.storage.Length - 1; i >= 0; i--)
+                    if(sc.isStellar && sc.isCollector == false && sc.isVeinCollector == false)  //星际运输站
                     {
-                        StationStore ss = sc.storage[i];
-                        if (ss.itemId <= 0 || !itemIndex.ContainsKey(ss.itemId) || ss.remoteLogic == ELogisticStorage.None && ss.localLogic == ELogisticStorage.None)
-                            continue;
-                        int count = ss.count + ss.localOrder + ss.remoteOrder;
-                        if (count < ss.max * 0.20)
+                        for (int i = sc.storage.Length - 1; i >= 0; i--)
                         {
-                            int expectCount = (int)(ss.max * 0.20) - count;
-                            int[] result = TakeItem(ss.itemId, expectCount);
-                            sc.storage[i].count += result[0];
-                            sc.storage[i].inc += result[1];
-                        }
-                        else if (count > ss.max * 0.25)
-                        {
-                            int expectCount = count - (int)(ss.max * 0.25);
-                            if (ss.itemId == 1120 || ss.itemId == 1114) // 防止氢和精炼油溢出堵塞原油分解,背包中氢和精炼油大于50%时，不从物流站，大矿机获取
+                            StationStore ss = sc.storage[i];
+                            if (ss.itemId <= 0 || !itemIndex.ContainsKey(ss.itemId)) continue;
+                            if (ss.localLogic == ELogisticStorage.Supply && ss.remoteLogic == ELogisticStorage.Supply && ss.count > 0)
                             {
-
-                                DeliveryPackage.GRID grid = deliveryPackage.grids[itemIndex[ss.itemId]];
-                                if (grid.count / grid.stackSizeModified >= 0.5)
-                                {
-                                    continue;
-                                }
-                                else
-                                {
-                                    int packageQuota = (int)(grid.stackSizeModified * 0.5 - grid.count);
-                                    expectCount = Math.Min(expectCount, packageQuota);
-                                }
-                            }
-                            if (expectCount > 0)
-                            {
-                                int expectInc = SplitInc(ss.count, ss.inc, expectCount);
-                                int[] result = AddItem(ss.itemId, expectCount, expectInc);
+                                int[] result = AddItem(ss.itemId, ss.count, ss.inc);
                                 sc.storage[i].count -= result[0];
                                 sc.storage[i].inc -= result[1];
                             }
-
+                            else if (ss.localLogic == ELogisticStorage.Demand && ss.remoteLogic == ELogisticStorage.Demand)
+                            {
+                                int expectCount = ss.max - ss.localOrder - ss.remoteOrder - ss.count;
+                                if (expectCount <= 0) continue;
+                                int[] result = TakeItem(ss.itemId, expectCount);
+                                sc.storage[i].count += result[0];
+                                sc.storage[i].inc += result[1];
+                            }
                         }
                     }
+                    if(sc.isStellar == false && sc.isCollector == false && sc.isVeinCollector == false) //行星运输站
+                    {
+                        for (int i = sc.storage.Length - 1; i >= 0; i--)
+                        {
+                            StationStore ss = sc.storage[i];
+                            if (ss.itemId <= 0 || !itemIndex.ContainsKey(ss.itemId)) continue;
+                            if (ss.localLogic == ELogisticStorage.Supply && ss.count > 0)
+                            {
+                                int[] result = AddItem(ss.itemId, ss.count, ss.inc);
+                                sc.storage[i].count -= result[0];
+                                sc.storage[i].inc -= result[1];
+                            }
+                            else if (ss.localLogic == ELogisticStorage.Demand)
+                            {
+                                int expectCount = ss.max - ss.localOrder - ss.remoteOrder - ss.count;
+                                if (expectCount <= 0) continue;
+                                int[] result = TakeItem(ss.itemId, expectCount);
+                                sc.storage[i].count += result[0];
+                                sc.storage[i].inc += result[1];
+                            }
+                        }
+                    }
+
                 }
             }
             taskState["ProcessTransport"] = true;
@@ -468,7 +473,7 @@ namespace PackageLogistic
         }
 
 
-        // 采矿机（不含大型采矿机）、抽水站、原油萃取站
+        // 采矿机、大型采矿机、抽水站、原油萃取站、轨道采集器
         void ProcessMiner(object state)
         {
             Logger.LogDebug("ProcessMiner");
@@ -476,6 +481,7 @@ namespace PackageLogistic
             {
                 PlanetFactory pf = GameMain.data.factories[index];
                 if (pf == null) continue;
+
                 for (int i = pf.factorySystem.minerPool.Length - 1; i >= 0; i--)
                 {
                     MinerComponent mc = pf.factorySystem.minerPool[i];
@@ -483,7 +489,35 @@ namespace PackageLogistic
                     int[] result = AddItem(mc.productId, mc.productCount, 0);
                     pf.factorySystem.minerPool[i].productCount -= result[0];
                 }
+
+                //大型矿机，轨道采集器
+                foreach (StationComponent sc in pf.transport.stationPool)
+                {
+                    if (sc == null || sc.id <= 0) { continue; }
+                    if(sc.isStellar && sc.isCollector)  //轨道采集器
+                    {
+                        for (int i = sc.storage.Length - 1; i >= 0; i--)
+                        {
+                            StationStore ss = sc.storage[i];
+                            if (ss.itemId <= 0 || ss.count <= 0 || !itemIndex.ContainsKey(ss.itemId) || ss.remoteLogic != ELogisticStorage.Supply)
+                                continue;
+
+                            int[] result = AddItem(ss.itemId, ss.count, 0);
+                            sc.storage[i].count -= result[0];
+                        }
+                    }
+                    else if(sc.isVeinCollector)  // 大型采矿机
+                    {
+                        StationStore ss = sc.storage[0];
+                        if (ss.itemId <= 0 || ss.count <= 0 || !itemIndex.ContainsKey(ss.itemId) || ss.localLogic != ELogisticStorage.Supply)
+                            continue;
+
+                        int[] result = AddItem(ss.itemId, ss.count, 0);
+                        sc.storage[0].count -= result[0];
+                    }
+                }
             }
+
             taskState["ProcessMiner"] = true;
         }
 
@@ -522,7 +556,7 @@ namespace PackageLogistic
                     int fuelId = 0;
                     switch (pgc.fuelMask)
                     {
-                        case 1: //火力发电厂使用燃料顺序：精炼油和氢超50%时，谁多使用谁，否则使用煤
+                        case 1: //火力发电厂使用燃料顺序：精炼油和氢超60%时，谁多使用谁，否则使用煤
                             float p_1114 = 0.0f;
                             float p_1120 = 0.0f;
                             if (itemIndex.ContainsKey(1114))
@@ -535,11 +569,11 @@ namespace PackageLogistic
                                 var grid = deliveryPackage.grids[itemIndex[1120]];
                                 p_1120 = (float)grid.count / (float)grid.stackSizeModified;
                             }
-                            if (p_1114 >= p_1120 && p_1114 > 0.5)
+                            if (p_1114 >= p_1120 && p_1114 > 0.60)
                             {
                                 fuelId = 1114; // 精炼油
                             }
-                            else if (p_1120 >= p_1114 && p_1120 > 0.5)
+                            else if (p_1120 >= p_1114 && p_1120 > 0.60)
                             {
                                 fuelId = 1120; // 氢
                             }
@@ -713,11 +747,19 @@ namespace PackageLogistic
             int index = itemIndex[itemId];
             if (index < 0 || deliveryPackage.grids[index].itemId != itemId)
                 return new int[2] { 0, 0 };
+
+            // 为了防止氢和原油溢出，导致原油分解阻塞，氢和原油只允许储存60%
             int max_count = Math.Min(deliveryPackage.grids[index].recycleCount, deliveryPackage.grids[index].stackSizeModified);
-            if (deliveryPackage.grids[index].count >= max_count)
-                return new int[2] { 0, 0 };
+            if (itemId == 1120 || itemId == 1114)
+            {
+                max_count = (int)(max_count * 0.60);
+            }
 
             int quota = max_count - deliveryPackage.grids[index].count;
+            if(quota <= 0)
+            {
+                return new int[2] { 0, 0 };
+            }
             if (count <= quota)
             {
                 deliveryPackage.grids[index].count += count;
