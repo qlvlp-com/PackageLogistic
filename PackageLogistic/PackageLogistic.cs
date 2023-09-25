@@ -149,7 +149,7 @@ namespace PackageLogistic
             if (showGUI)
             {
                 GUI.DrawTexture(windowRect, windowTexture);
-                windowRect = GUI.Window(0, windowRect, WindowFunction, "设置");
+                windowRect = GUI.Window(0, windowRect, WindowFunction, "PackageLogistic 设置");
             }
         }
 
@@ -335,6 +335,10 @@ namespace PackageLogistic
             {
                 DeliveryPackage.GRID grid = deliveryPackage.grids[index];
                 int max_count = Math.Min(grid.recycleCount, grid.stackSizeModified);
+                if(grid.itemId == 1114 || grid.itemId == 1120)  // 为了防止氢和精炼油溢出，导致原油裂解阻塞，氢和精炼油只允许储存60%
+                {
+                    max_count = (int)(max_count * 0.60);
+                }
                 if (grid.itemId > 0)
                 {
                     if (!itemIndex.ContainsKey(grid.itemId))
@@ -357,14 +361,7 @@ namespace PackageLogistic
                             int[] items = new int[4] { 1000, 1116, 1120, 1121 };  // 水，硫酸，氢，重氢
                             if (items.Contains(grid.itemId) || LDB.veins.GetVeinTypeByItemId(grid.itemId) != EVeinType.None)
                             {
-                                if (grid.itemId == 1120 && grid.count < 0.60 * max_count)  // 为了防止氢和原油溢出，导致原油分解阻塞，氢和原油只允许储存60%
-                                {
-                                    deliveryPackage.grids[index].count = (int)(0.60 * max_count);
-                                }
-                                else if (grid.itemId != 1120)
-                                {
-                                    deliveryPackage.grids[index].count = max_count;
-                                }
+                                deliveryPackage.grids[index].count = max_count;
                             }
                         }
                         if (infBuildings.Value && max_count != grid.count && item.CanBuild)
@@ -748,7 +745,7 @@ namespace PackageLogistic
             if (index < 0 || deliveryPackage.grids[index].itemId != itemId)
                 return new int[2] { 0, 0 };
 
-            // 为了防止氢和原油溢出，导致原油分解阻塞，氢和原油只允许储存60%
+            // 为了防止氢和精炼油溢出，导致原油裂解阻塞，氢和精炼油只允许储存60%
             int max_count = Math.Min(deliveryPackage.grids[index].recycleCount, deliveryPackage.grids[index].stackSizeModified);
             if (itemId == 1120 || itemId == 1114)
             {
