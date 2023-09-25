@@ -1,0 +1,6 @@
+D:\projects\PackageLogistic\bin\Debug\PackageLogistic.dll
+D:\projects\PackageLogistic\bin\Debug\PackageLogistic.pdb
+D:\projects\PackageLogistic\obj\Debug\PackageLogistic.csproj.AssemblyReference.cache
+D:\projects\PackageLogistic\obj\Debug\PackageLogistic.csproj.CoreCompileInputs.cache
+D:\projects\PackageLogistic\obj\Debug\PackageLogistic.dll
+D:\projects\PackageLogistic\obj\Debug\PackageLogistic.pdb
