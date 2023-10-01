@@ -15,7 +15,7 @@ namespace PackageLogistic
     {
         public const string GUID = "com.qlvlp.dsp.PackageLogistic";
         public const string NAME = "PackageLogistic";
-        public const string VERSION = "1.0.0";
+        public const string VERSION = "1.0.1";
 
         ConfigEntry<Boolean> autoSpray;
         ConfigEntry<Boolean> costProliferator;
@@ -34,12 +34,11 @@ namespace PackageLogistic
             {1142, 0 },
             {1143, 0 }
         };
-
         Dictionary<string, bool> taskState = new Dictionary<string, bool>();
+        int stackSize = 0;
 
         private bool showGUI = false;
-
-        private Rect windowRect = new Rect(50, 50, 500, 350);
+        private Rect windowRect = new Rect(700, 250, 500, 350);
         private Texture2D windowTexture = new Texture2D(10, 10);
 
         void Start()
@@ -207,42 +206,114 @@ namespace PackageLogistic
 
             if (GameMain.history.TechUnlocked(2306))
             {
+                stackSize = 5000;
                 if (GameMain.mainPlayer.package.size < 160)
                     GameMain.mainPlayer.package.SetSize(160);
 
             }
-            if (GameMain.history.TechUnlocked(2305))
+            else if (GameMain.history.TechUnlocked(2305))
             {
+                stackSize = 4000;
                 if (GameMain.mainPlayer.package.size < 140)
                     GameMain.mainPlayer.package.SetSize(140);
             }
-            if (GameMain.history.TechUnlocked(2304))
+            else if (GameMain.history.TechUnlocked(2304))
             {
+                stackSize = 3000;
                 if (GameMain.mainPlayer.package.size < 120)
                     GameMain.mainPlayer.package.SetSize(120);
             }
-            if (GameMain.history.TechUnlocked(2303))
+            else if (GameMain.history.TechUnlocked(2303))
             {
+                stackSize = 2000;
                 if (GameMain.mainPlayer.package.size < 110)
                     GameMain.mainPlayer.package.SetSize(110);
             }
-            if (GameMain.history.TechUnlocked(2302))
+            else if (GameMain.history.TechUnlocked(2302))
             {
+                stackSize = 1000;
                 if (GameMain.mainPlayer.package.size < 100)
                     GameMain.mainPlayer.package.SetSize(100);
             }
-            if (GameMain.history.TechUnlocked(2301))
+            else if (GameMain.history.TechUnlocked(2301))
             {
+                stackSize = 500;
                 if (GameMain.mainPlayer.package.size < 90)
                     GameMain.mainPlayer.package.SetSize(90);
             }
             else
             {
+                stackSize = 300;
                 if (GameMain.mainPlayer.package.size < 80)
                     GameMain.mainPlayer.package.SetSize(80);
             }
 
         }
+
+
+        void ItemIndex()
+        {
+            Logger.LogDebug("ItemIndex");
+            for (int index = 0; index < deliveryPackage.gridLength; index++)
+            {
+                DeliveryPackage.GRID grid = deliveryPackage.grids[index];
+                int max_count = Math.Min(grid.recycleCount, grid.stackSizeModified);
+                if (grid.itemId == 1114 || grid.itemId == 1120)  // 为了防止氢和精炼油溢出，导致原油裂解阻塞，氢和精炼油只允许储存60%
+                {
+                    max_count = (int)(max_count * 0.60);
+                }
+                if (grid.itemId > 0)
+                {
+                    if (!itemIndex.ContainsKey(grid.itemId))
+                        itemIndex.Add(grid.itemId, index);
+                    else
+                        itemIndex[grid.itemId] = index;
+
+
+                    ItemProto item = LDB.items.Select(grid.itemId);
+                    if(!item.CanBuild && stackSize > item.StackSize)
+                    {
+                        deliveryPackage.grids[index].stackSize = stackSize;
+                    }
+
+
+                    if (infItems.Value && max_count != grid.count)
+                    {
+                        deliveryPackage.grids[index].count = max_count;
+                    }
+                    else
+                    {
+                        if (infVeins.Value && max_count != grid.count)
+                        {
+                            if (IsVein(grid.itemId))
+                            {
+                                deliveryPackage.grids[index].count = max_count;
+                            }
+                        }
+                        if (infBuildings.Value && max_count != grid.count && item.CanBuild)
+                        {
+                            deliveryPackage.grids[index].count = max_count;
+                        }
+                    }
+
+                    AutoSpray(index);
+                }
+            }
+        }
+
+
+        bool IsVein(int itemId)
+        {
+            int[] items = new int[4] { 1000, 1116, 1120, 1121 };  // 水，硫酸，氢，重氢
+            if (items.Contains(itemId) || LDB.veins.GetVeinTypeByItemId(itemId) != EVeinType.None)
+            {
+                return true;
+            }else
+            {
+                return false;
+            }
+        }
+
 
         void AutoSpray(int index)
         {
@@ -324,53 +395,6 @@ namespace PackageLogistic
                     {
                         incPool[incId] = result[0] * factor;
                     }
-                }
-            }
-        }
-
-        void ItemIndex()
-        {
-            Logger.LogDebug("ItemIndex");
-            for (int index = 0; index < deliveryPackage.gridLength; index++)
-            {
-                DeliveryPackage.GRID grid = deliveryPackage.grids[index];
-                int max_count = Math.Min(grid.recycleCount, grid.stackSizeModified);
-                if(grid.itemId == 1114 || grid.itemId == 1120)  // 为了防止氢和精炼油溢出，导致原油裂解阻塞，氢和精炼油只允许储存60%
-                {
-                    max_count = (int)(max_count * 0.60);
-                }
-                if (grid.itemId > 0)
-                {
-                    if (!itemIndex.ContainsKey(grid.itemId))
-                        itemIndex.Add(grid.itemId, index);
-                    else
-                        itemIndex[grid.itemId] = index;
-
-                    ItemProto item = LDB.items.Select(grid.itemId);
-                    if (!item.CanBuild && item.StackSize < 1000)
-                        deliveryPackage.grids[index].stackSize = 1000;
-
-                    if (infItems.Value && max_count != grid.count)
-                    {
-                        deliveryPackage.grids[index].count = max_count;
-                    }
-                    else
-                    {
-                        if (infVeins.Value && max_count != grid.count)
-                        {
-                            int[] items = new int[4] { 1000, 1116, 1120, 1121 };  // 水，硫酸，氢，重氢
-                            if (items.Contains(grid.itemId) || LDB.veins.GetVeinTypeByItemId(grid.itemId) != EVeinType.None)
-                            {
-                                deliveryPackage.grids[index].count = max_count;
-                            }
-                        }
-                        if (infBuildings.Value && max_count != grid.count && item.CanBuild)
-                        {
-                            deliveryPackage.grids[index].count = max_count;
-                        }
-                    }
-
-                    AutoSpray(index);
                 }
             }
         }
