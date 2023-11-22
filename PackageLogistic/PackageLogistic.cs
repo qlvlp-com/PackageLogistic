@@ -7,17 +7,31 @@ using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
 using UnityEngine;
-using Steamworks;
-using System.Reflection;
+
 
 namespace PackageLogistic
 {
+
+    struct TransportStore
+    {
+        public int planetIndex;
+        public int transportIndex;
+        public int storageIndex;
+
+        public TransportStore(int planetIndex, int transportIndex, int storageIndex) : this()
+        {
+            this.planetIndex = planetIndex;
+            this.transportIndex = transportIndex;
+            this.storageIndex = storageIndex;
+        }
+    }
+
     [BepInPlugin(GUID, NAME, VERSION)]
     public class PackageLogistic : BaseUnityPlugin
     {
         public const string GUID = "com.qlvlp.dsp.PackageLogistic";
         public const string NAME = "PackageLogistic";
-        public const string VERSION = "1.0.2";
+        public const string VERSION = "1.0.3";
 
         ConfigEntry<Boolean> autoSpray;
         ConfigEntry<Boolean> costProliferator;
@@ -25,11 +39,13 @@ namespace PackageLogistic
         ConfigEntry<Boolean> infItems;
         ConfigEntry<Boolean> infSand;
         ConfigEntry<Boolean> infBuildings;
+        ConfigEntry<Boolean> useStorege;
         ConfigEntry<KeyboardShortcut> hotKey;
         ConfigEntry<Boolean> enableMod;
 
         DeliveryPackage deliveryPackage;
-        Dictionary<int, int> itemIndex = new Dictionary<int, int>(); //<itemId,deliveryPackage.grids Index>
+        Dictionary<int, int> packageItemIndex = new Dictionary<int, int>(); //<itemId,deliveryPackage.grids Index>
+        Dictionary<int, List<TransportStore>> transportItemIndex = new Dictionary<int, List<TransportStore>>(); //<itemId, transportStore>
         Dictionary<int, int> incPool = new Dictionary<int, int>()
         {
             {1141, 0 },
@@ -42,7 +58,7 @@ namespace PackageLogistic
         private const int hydrogenId = 1120;
 
         private bool showGUI = false;
-        private Rect windowRect = new Rect(700, 250, 500, 350);
+        private Rect windowRect = new Rect(700, 250, 500, 400);
         private Texture2D windowTexture = new Texture2D(10, 10);
 
         void Start()
@@ -54,6 +70,7 @@ namespace PackageLogistic
             infVeins = Config.Bind<Boolean>("配置", "InfVeins", false, "无限矿物。物流背包内所有矿物无限数量");
             infBuildings = Config.Bind<Boolean>("配置", "InfBuildings", false, "无限建筑。物流背包内所有建筑无限数量");
             infSand = Config.Bind<Boolean>("配置", "InfSand", false, "无限沙土。沙土无限数量（固定为1G）");
+            useStorege = Config.Bind<Boolean>("配置", "useStorege", true, "从储物箱和储液罐回收物品");
             hotKey = Config.Bind("窗口快捷键", "Key", new KeyboardShortcut(KeyCode.L, KeyCode.LeftControl));
 
 
@@ -73,18 +90,28 @@ namespace PackageLogistic
                             continue;
                         }
 
-                        if (infSand.Value && GameMain.mainPlayer.sandCount != 1000000000)
-                        {
-                            Traverse.Create(GameMain.mainPlayer).Property("sandCount").SetValue(1000000000);
-                        }
-
                         if (enableMod.Value)
                         {
+                            if (infSand.Value && GameMain.mainPlayer.sandCount != 1000000000)
+                            {
+                                Traverse.Create(GameMain.mainPlayer).Property("sandCount").SetValue(1000000000);
+                            }
+
                             deliveryPackage = GameMain.mainPlayer.deliveryPackage;
-                            CreateItemIndex();
+                            CreateDeliveryPackageItemIndex();
+                            CreateTransportItemIndex();
                             CheckTech();
                             taskState["ProcessTransport"] = false;
                             ThreadPool.QueueUserWorkItem(ProcessTransport, taskState);
+                            if (useStorege.Value)
+                            {
+                                taskState["ProcessStorage"] = false;
+                                ThreadPool.QueueUserWorkItem(ProcessStorage, taskState);
+                            }
+                            else
+                            {
+                                taskState["ProcessStorage"] = true;
+                            }
                             taskState["ProcessAssembler"] = false;
                             ThreadPool.QueueUserWorkItem(ProcessAssembler, taskState);
                             taskState["ProcessMiner"] = false;
@@ -182,6 +209,8 @@ namespace PackageLogistic
             infItems.Value = GUILayout.Toggle(infItems.Value, "无限物品");
             GUILayout.Label("物流背包内所有物品无限数量（无法获取成就）");
 
+            useStorege.Value = GUILayout.Toggle(useStorege.Value, "从储物箱和储液罐回收物品");
+
             GUILayout.EndVertical();
 
             GUI.DragWindow();
@@ -252,22 +281,30 @@ namespace PackageLogistic
                     GameMain.mainPlayer.package.SetSize(80);
             }
 
+            if (GameMain.history.TechUnlocked(3510))
+            {
+                GameMain.history.remoteStationExtraStorage = 40000;
+            }
+            else if (GameMain.history.TechUnlocked(3509))
+            {
+                GameMain.history.remoteStationExtraStorage = 15000;
+            }
         }
 
 
-        void CreateItemIndex()
+        void CreateDeliveryPackageItemIndex()
         {
-            Logger.LogDebug("CreateItemIndex");
+            Logger.LogDebug("CreateDeliveryPackageItemIndex");
             for (int index = 0; index < deliveryPackage.gridLength; index++)
             {
                 DeliveryPackage.GRID grid = deliveryPackage.grids[index];
                 int max_count = Math.Min(grid.recycleCount, grid.stackSizeModified);
                 if (grid.itemId > 0)
                 {
-                    if (!itemIndex.ContainsKey(grid.itemId))
-                        itemIndex.Add(grid.itemId, index);
+                    if (!packageItemIndex.ContainsKey(grid.itemId))
+                        packageItemIndex.Add(grid.itemId, index);
                     else
-                        itemIndex[grid.itemId] = index;
+                        packageItemIndex[grid.itemId] = index;
 
 
                     ItemProto item = LDB.items.Select(grid.itemId);
@@ -277,13 +314,13 @@ namespace PackageLogistic
                     }
 
 
-                    if (infItems.Value)
+                    if (infItems.Value)  // 无限物品模式
                     {
                         deliveryPackage.grids[index].count = max_count;
                     }
                     else
                     {
-                        if (infVeins.Value && IsVein(grid.itemId))
+                        if (infVeins.Value && IsVein(grid.itemId))  //无限矿物模式
                         {
                             // 在无限矿物模式下，为防止氢溢出导致原油裂解反应阻塞，氢储量百分比设置为blockThreshold
                             if (grid.itemId == hydrogenId)
@@ -292,17 +329,80 @@ namespace PackageLogistic
                             }
                             deliveryPackage.grids[index].count = max_count;
                         }
-                        if (infBuildings.Value && item.CanBuild)
+                        if (infBuildings.Value && item.CanBuild)  //无限建筑模式
                         {
                             deliveryPackage.grids[index].count = max_count;
                         }
                     }
 
-                    AutoSpray(index);
+                    SprayDeliveryPackageItem(index);
                 }
             }
         }
 
+        void CreateTransportItemIndex()
+        {
+            Logger.LogDebug("CreateTransportItemIndex");
+            transportItemIndex = new Dictionary<int, List<TransportStore>>();
+            for (int planetIndex = GameMain.data.factories.Length - 1; planetIndex >= 0; planetIndex--)
+            {
+                PlanetFactory pf = GameMain.data.factories[planetIndex];
+                if (pf == null) continue;
+                for (int transportIndex = pf.transport.stationPool.Length - 1; transportIndex >= 0; transportIndex--)
+                {
+                    StationComponent sc = pf.transport.stationPool[transportIndex];
+                    if (sc == null || sc.id <= 0) { continue; }
+                    if (sc.isStellar && sc.isCollector == false && sc.isVeinCollector == false)  //星际运输站
+                    {
+                        for (int storageIndex = sc.storage.Length - 1; storageIndex >= 0; storageIndex--)
+                        {
+                            StationStore ss = sc.storage[storageIndex];
+                            if (ss.itemId <= 0) continue;
+                            if (!transportItemIndex.ContainsKey(ss.itemId))
+                            {
+                                transportItemIndex[ss.itemId] = new List<TransportStore>();
+                            }
+                            TransportStore store = new TransportStore(planetIndex, transportIndex, storageIndex);
+                            transportItemIndex[ss.itemId].Add(new TransportStore(planetIndex, transportIndex, storageIndex));
+
+                            ItemProto item = LDB.items.Select(ss.itemId);  //建筑物储量最大值设置为物品默认堆叠值
+                            if (item.CanBuild)
+                            {
+                                sc.storage[storageIndex].max = Math.Min(item.StackSize * 10, ss.max);
+                            }
+
+
+                            if (infItems.Value)  // 无限物品模式
+                            {
+                                sc.storage[storageIndex].count = ss.max;
+                            }
+                            else
+                            {
+                                if (infVeins.Value && IsVein(ss.itemId))  //无限矿物模式
+                                {
+                                    // 在无限矿物模式下，为防止氢溢出导致原油裂解反应阻塞，氢储量百分比设置为blockThreshold
+                                    if (ss.itemId == hydrogenId)
+                                    {
+                                        sc.storage[storageIndex].count = (int)(ss.max * hydrogenThreshold);
+                                    }
+                                    else
+                                    {
+                                        sc.storage[storageIndex].count = ss.max;
+                                    }
+                                }
+
+                                if (infBuildings.Value && item.CanBuild)  //无限建筑模式
+                                {
+                                    sc.storage[storageIndex].count = ss.max;
+                                }
+                            }
+
+                            SprayTransportItem(store);
+                        }
+                    }
+                }
+            }
+        }
 
         bool IsVein(int itemId)
         {
@@ -318,7 +418,11 @@ namespace PackageLogistic
         }
 
 
-        void AutoSpray(int index)
+        /// <summary>
+        /// 对物流背包内物品（建筑物除外）进行增产剂喷涂，优先使用高阶增产剂。
+        /// </summary>
+        /// <param name="index"></param>
+        void SprayDeliveryPackageItem(int index)
         {
             if (!autoSpray.Value)
                 return;
@@ -330,48 +434,87 @@ namespace PackageLogistic
                 deliveryPackage.grids[index].inc = deliveryPackage.grids[index].count * 4;
                 return;
             }
-
-            ItemProto item = LDB.items.Select(grid.itemId);
-            if (item.CanBuild)
-                return;
             if (!costProliferator.Value && grid.inc < grid.count * 4)
             {
                 deliveryPackage.grids[index].inc = grid.count * 4;
                 return;
             }
+            ItemProto item = LDB.items.Select(grid.itemId);
+            if (item.CanBuild)
+                return;
 
-            int index1 = Array.FindIndex(deliveryPackage.grids, g => g.itemId == 1141); //增产剂MK.I
-            int index2 = Array.FindIndex(deliveryPackage.grids, g => g.itemId == 1142); //增产剂MK.II
-            int index3 = Array.FindIndex(deliveryPackage.grids, g => g.itemId == 1143); //增产剂MK.III
-            if (index3 >= 0 && deliveryPackage.grids[index3].count > 0 && grid.inc < grid.count * 4)
+            List<(int, int)> proliferators = new List<(int, int)>();
+            proliferators.Add((1143, 4));  //增产剂MK.III
+            proliferators.Add((1142, 2));  //增产剂MK.II
+            proliferators.Add((1141, 1));  //增产剂MK.I
+            foreach (var proliferator in proliferators)
             {
-                int expectInc = grid.count * 4 - grid.inc;
-                int realInc = GetInc(1143, expectInc);
-                deliveryPackage.grids[index].inc += realInc;
-            }
-            else if (index2 >= 0 && deliveryPackage.grids[index2].count > 0 && grid.inc < grid.count * 2)
-            {
-                int expectInc = grid.count * 2 - grid.inc;
-                int realInc = GetInc(1142, expectInc);
-                deliveryPackage.grids[index].inc += realInc;
-            }
-            else if (index1 >= 0 && deliveryPackage.grids[index1].count > 0 && grid.inc < grid.count * 1)
-            {
-                int expectInc = grid.count * 1 - grid.inc;
-                int realInc = GetInc(1141, expectInc);
-                deliveryPackage.grids[index].inc += realInc;
+                int expectInc = grid.count * proliferator.Item2 - grid.inc;
+                if (expectInc <= 0)
+                    break;
+                int realInc = GetInc(proliferator.Item1, expectInc);
+                if (realInc > 0)
+                {
+                    deliveryPackage.grids[index].inc += realInc;
+                }
             }
         }
 
-        int GetInc(int incId, int count)
+        /// <summary>
+        /// 对星际物流塔内物品（建筑物除外）进行增产剂喷涂，优先使用高阶增产剂。
+        /// </summary>
+        /// <param name="store"></param>
+        void SprayTransportItem(TransportStore store)
+        {
+            if (!autoSpray.Value)
+                return;
+            PlanetFactory pf = GameMain.data.factories[store.planetIndex];
+            StationComponent sc = pf.transport.stationPool[store.transportIndex];
+            StationStore ss = sc.storage[store.storageIndex];
+            if (ss.itemId <= 0 || ss.count <= 0)
+                return;
+            if (ss.itemId == 1141 || ss.itemId == 1142 || ss.itemId == 1143)
+            {
+                sc.storage[store.storageIndex].inc = ss.count * 4;
+                return;
+            }
+            if (!costProliferator.Value && ss.inc < ss.count * 4)
+            {
+                sc.storage[store.storageIndex].inc = ss.count * 4;
+                return;
+            }
+            ItemProto item = LDB.items.Select(ss.itemId);
+            if (item.CanBuild)
+                return;
+
+            List<(int, int)> proliferators = new List<(int, int)>();
+            proliferators.Add((1143, 4));  //增产剂MK.III
+            proliferators.Add((1142, 2));  //增产剂MK.II
+            proliferators.Add((1141, 1));  //增产剂MK.I
+            foreach (var proliferator in proliferators)
+            {
+                int expectInc = ss.count * proliferator.Item2 - ss.inc;
+                if (expectInc <= 0)
+                    break;
+                int realInc = GetInc(proliferator.Item1, expectInc);
+                if (realInc > 0)
+                {
+                    sc.storage[store.storageIndex].inc += realInc;
+                }
+            }
+        }
+
+
+        //从增产点数池中获取指定增产剂类型的增产点数
+        int GetInc(int proliferatorId, int count)
         {
             int realCount = 0;
             int factor;
-            if (incId == 1143)
+            if (proliferatorId == 1143)
                 factor = 75;
-            else if (incId == 1142)
+            else if (proliferatorId == 1142)
                 factor = 30;
-            else if (incId == 1141)
+            else if (proliferatorId == 1141)
                 factor = 15;
             else
                 return 0;
@@ -380,31 +523,30 @@ namespace PackageLogistic
 
             while (true)
             {
-                if (incPool[incId] >= count)
+                if (incPool[proliferatorId] >= count)
                 {
-                    incPool[incId] -= count;
+                    incPool[proliferatorId] -= count;
                     realCount += count;
                     return realCount;
                 }
                 else
                 {
-                    realCount += incPool[incId];
-                    count -= incPool[incId];
-                    incPool[incId] = 0;
-                    int[] result = TakeItem(incId, 600 / factor);
+                    realCount += incPool[proliferatorId];
+                    count -= incPool[proliferatorId];
+                    incPool[proliferatorId] = 0;
+                    int[] result = TakeItem(proliferatorId, 600 / factor);
                     if (result[0] == 0)
                         return realCount;
                     else
                     {
-                        incPool[incId] = result[0] * factor;
+                        incPool[proliferatorId] = result[0] * factor;
                     }
                 }
             }
         }
 
 
-        //行星内物流运输站、星际物流运输站
-        //当星际运输站本地物流和星际物流同时为供应时，向背包内投放物品，同时为需求时从背包内获取物品
+        //行星内物流运输站
         void ProcessTransport(object state)
         {
             Logger.LogDebug("ProcessTransport");
@@ -415,55 +557,16 @@ namespace PackageLogistic
                 foreach (StationComponent sc in pf.transport.stationPool)
                 {
                     if (sc == null || sc.id <= 0) { continue; }
-                    if (sc.isStellar && sc.isCollector == false && sc.isVeinCollector == false)  //星际运输站
-                    {
-                        for (int i = sc.storage.Length - 1; i >= 0; i--)
-                        {
-                            StationStore ss = sc.storage[i];
-                            if (ss.itemId <= 0 || !itemIndex.ContainsKey(ss.itemId)) continue;
-                            if (ss.localLogic == ELogisticStorage.Supply && ss.remoteLogic == ELogisticStorage.Supply && ss.count > 0)
-                            {
-                                int[] result;
-                                if (ss.itemId == hydrogenId)  // 当背包中氢气储量百分比大于blockThreshold时，将不再从物流塔中回收氢气
-                                {
-                                    result = AddHydrogen(ss.itemId, ss.count, ss.inc);
-
-                                }
-                                else
-                                {
-                                    result = AddItem(ss.itemId, ss.count, ss.inc);
-                                }
-                                sc.storage[i].count -= result[0];
-                                sc.storage[i].inc -= result[1];
-                            }
-                            else if (ss.localLogic == ELogisticStorage.Demand && ss.remoteLogic == ELogisticStorage.Demand)
-                            {
-                                int expectCount = ss.max - ss.localOrder - ss.remoteOrder - ss.count;
-                                if (expectCount <= 0) continue;
-                                int[] result = TakeItem(ss.itemId, expectCount);
-                                sc.storage[i].count += result[0];
-                                sc.storage[i].inc += result[1];
-                            }
-                        }
-                    }
                     if (sc.isStellar == false && sc.isCollector == false && sc.isVeinCollector == false) //行星运输站
                     {
                         for (int i = sc.storage.Length - 1; i >= 0; i--)
                         {
                             StationStore ss = sc.storage[i];
-                            if (ss.itemId <= 0 || !itemIndex.ContainsKey(ss.itemId)) continue;
+                            if (ss.itemId <= 0 || !packageItemIndex.ContainsKey(ss.itemId)) continue;
                             if (ss.localLogic == ELogisticStorage.Supply && ss.count > 0)
                             {
                                 int[] result;
-                                if (ss.itemId == hydrogenId)  //当背包中氢气储量百分比大于blockThreshold时，将不再从物流塔中回收氢气
-                                {
-                                    result = AddHydrogen(ss.itemId, ss.count, ss.inc);
-
-                                }
-                                else
-                                {
-                                    result = AddItem(ss.itemId, ss.count, ss.inc);
-                                }
+                                result = AddItem(ss.itemId, ss.count, ss.inc, false);
                                 sc.storage[i].count -= result[0];
                                 sc.storage[i].inc -= result[1];
                             }
@@ -482,6 +585,52 @@ namespace PackageLogistic
             }
             taskState["ProcessTransport"] = true;
         }
+
+
+        //仓储设备（储物箱，储液罐）
+        void ProcessStorage(object state)
+        {
+            Logger.LogDebug("ProcessStorage");
+            for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
+            {
+
+                PlanetFactory pf = GameMain.data.factories[index];
+                if (pf == null) continue;
+                foreach (StorageComponent sc in pf.factoryStorage.storagePool)
+                {
+                    if (sc == null || sc.isEmpty) continue;
+                    for (int i = sc.grids.Length - 1; i >= 0; i--)
+                    {
+                        StorageComponent.GRID grid = sc.grids[i];
+                        if (grid.itemId <= 0 || grid.count <= 0 || !packageItemIndex.ContainsKey(grid.itemId)) continue;
+                        int[] result = AddItem(grid.itemId, grid.count, grid.inc, false);
+                        if (result[0] != 0)
+                        {
+                            sc.grids[i].count -= result[0];
+                            sc.grids[i].inc -= result[1];
+                        }
+                    }
+                    sc.Sort();
+                }
+
+                for (int i = pf.factoryStorage.tankPool.Length - 1; i >= 0; --i)
+                {
+                    TankComponent tc = pf.factoryStorage.tankPool[i];
+                    if (tc.id == 0 || tc.fluidId == 0 || tc.fluidCount == 0 || !packageItemIndex.ContainsKey(tc.fluidId)) continue;
+                    int[] result = AddItem(tc.fluidId, tc.fluidCount, tc.fluidInc, false);
+                    pf.factoryStorage.tankPool[i].fluidCount -= result[0];
+                    pf.factoryStorage.tankPool[i].fluidInc -= result[1];
+                    if (pf.factoryStorage.tankPool[i].fluidCount <= 0)
+                    {
+                        pf.factoryStorage.tankPool[i].fluidId = 0;
+                        pf.factoryStorage.tankPool[i].fluidInc = 0;
+                    }
+                }
+
+            }
+            taskState["ProcessStorage"] = true;
+        }
+
 
         //熔炉、制造台、原油精炼厂、化工厂、粒子对撞机
         void ProcessAssembler(object state)
@@ -528,7 +677,7 @@ namespace PackageLogistic
                 {
                     MinerComponent mc = pf.factorySystem.minerPool[i];
                     if (mc.id <= 0 || mc.productId <= 0 || mc.productCount <= 0) continue;
-                    int[] result = AddItem(mc.productId, mc.productCount, 0);
+                    int[] result = AddItem(mc.productId, mc.productCount, 0, false);
                     pf.factorySystem.minerPool[i].productCount -= result[0];
                 }
 
@@ -541,18 +690,11 @@ namespace PackageLogistic
                         for (int i = sc.storage.Length - 1; i >= 0; i--)
                         {
                             StationStore ss = sc.storage[i];
-                            if (ss.itemId <= 0 || ss.count <= 0 || !itemIndex.ContainsKey(ss.itemId) || ss.remoteLogic != ELogisticStorage.Supply)
+                            if (ss.itemId <= 0 || ss.count <= 0 || !packageItemIndex.ContainsKey(ss.itemId) || ss.remoteLogic != ELogisticStorage.Supply)
                                 continue;
 
                             int[] result;
-                            if (ss.itemId == hydrogenId)  // 当背包中氢气储量百分比大于blockThreshold时，将不再从物流塔中回收氢气
-                            {
-                                result = AddHydrogen(ss.itemId, ss.count, ss.inc);
-                            }
-                            else
-                            {
-                                result = AddItem(ss.itemId, ss.count, 0);
-                            }
+                            result = AddItem(ss.itemId, ss.count, 0, false);
 
                             sc.storage[i].count -= result[0];
                         }
@@ -560,10 +702,10 @@ namespace PackageLogistic
                     else if (sc.isVeinCollector)  // 大型采矿机
                     {
                         StationStore ss = sc.storage[0];
-                        if (ss.itemId <= 0 || ss.count <= 0 || !itemIndex.ContainsKey(ss.itemId) || ss.localLogic != ELogisticStorage.Supply)
+                        if (ss.itemId <= 0 || ss.count <= 0 || !packageItemIndex.ContainsKey(ss.itemId) || ss.localLogic != ELogisticStorage.Supply)
                             continue;
 
-                        int[] result = AddItem(ss.itemId, ss.count, 0);
+                        int[] result = AddItem(ss.itemId, ss.count, 0, false);
                         sc.storage[0].count -= result[0];
                     }
                 }
@@ -610,14 +752,14 @@ namespace PackageLogistic
                         case 1: //火力发电厂使用燃料顺序：精炼油和氢超60%时，谁多使用谁，否则使用煤
                             float p_1114 = 0.0f;
                             float p_1120 = 0.0f;
-                            if (itemIndex.ContainsKey(1114))
+                            if (packageItemIndex.ContainsKey(1114))
                             {
-                                var grid = deliveryPackage.grids[itemIndex[1114]];
+                                var grid = deliveryPackage.grids[packageItemIndex[1114]];
                                 p_1114 = (float)grid.count / (float)(grid.stackSizeModified);
                             }
-                            if (itemIndex.ContainsKey(1120))
+                            if (packageItemIndex.ContainsKey(1120))
                             {
-                                var grid = deliveryPackage.grids[itemIndex[1120]];
+                                var grid = deliveryPackage.grids[packageItemIndex[1120]];
                                 p_1120 = (float)grid.count / (float)grid.stackSizeModified;
                             }
                             if (p_1114 >= p_1120 && p_1114 > 0.60)
@@ -785,53 +927,74 @@ namespace PackageLogistic
 
 
         // 向背包内放入氢气，为防止氢气溢出阻塞原油裂解反应，氢气储量百分比最大为hydrogenThreshold
-        int[] AddHydrogen(int itemId, int count, int inc)
-        {
-            if (itemId <= 0 || count <= 0 || !itemIndex.ContainsKey(itemId))
-                return new int[2] { 0, 0 };
-            int index = itemIndex[itemId];
-            if (index < 0 || deliveryPackage.grids[index].itemId != itemId)
-                return new int[2] { 0, 0 };
+        //int[] AddHydrogen(int itemId, int count, int inc)
+        //{
+        //    if (itemId <= 0 || count <= 0 || !packageItemIndex.ContainsKey(itemId))
+        //        return new int[2] { 0, 0 };
+        //    int index = packageItemIndex[itemId];
+        //    if (index < 0 || deliveryPackage.grids[index].itemId != itemId)
+        //        return new int[2] { 0, 0 };
 
-            int max_count = (int)(Math.Min(deliveryPackage.grids[index].recycleCount, deliveryPackage.grids[index].stackSizeModified) * hydrogenThreshold);
-            int quota = max_count - deliveryPackage.grids[index].count;
-            if (quota <= 0)
+        //    int max_count = (int)(Math.Min(deliveryPackage.grids[index].recycleCount, deliveryPackage.grids[index].stackSizeModified) * hydrogenThreshold);
+        //    int quota = max_count - deliveryPackage.grids[index].count;
+        //    if (quota <= 0)
+        //    {
+        //        return new int[2] { 0, 0 };
+        //    }
+        //    if (count <= quota)
+        //    {
+        //        deliveryPackage.grids[index].count += count;
+        //        deliveryPackage.grids[index].inc += inc;
+        //        SprayDeliveryPackageItem(index);
+        //        return new int[2] { count, inc };
+        //    }
+        //    else
+        //    {
+        //        deliveryPackage.grids[index].count = max_count;
+        //        int realInc = SplitInc(count, inc, quota);
+        //        deliveryPackage.grids[index].inc += realInc;
+        //        SprayDeliveryPackageItem(index);
+        //        return new int[2] { quota, realInc };
+        //    }
+        //}
+
+
+        //优先使用物流背包，其次星际物流塔
+
+        //优先使用物流背包，其次星际物流塔
+        int[] AddItem(int itemId, int count, int inc, bool assembler = true)
+        {
+            int[] result = AddDeliveryPackageItem(itemId, count, inc, assembler);
+            if (result[0] == count)
             {
-                return new int[2] { 0, 0 };
+                return result;
             }
-            if (count <= quota)
-            {
-                deliveryPackage.grids[index].count += count;
-                deliveryPackage.grids[index].inc += inc;
-                AutoSpray(index);
-                return new int[2] { count, inc };
-            }
-            else
-            {
-                deliveryPackage.grids[index].count = max_count;
-                int realInc = SplitInc(count, inc, quota);
-                deliveryPackage.grids[index].inc += realInc;
-                AutoSpray(index);
-                return new int[2] { quota, realInc };
-            }
+            int[] result1 = AddTransportItem(itemId, count - result[0], inc - result[1], assembler);
+            result1[0] += result[0];
+            result1[1] += result[1];
+            return result1;
         }
 
+
         /// <summary>
-        /// 
+        /// 向物流背包中放入物品
         /// </summary>
         /// <param name="itemId"></param>
         /// <param name="count"></param>
         /// <param name="inc"></param>
+        /// <param name="assembler">物品是否来源于制造设备</param>
         /// <returns>{实际放入物品数量， 实际放入物品增产量}</returns>
-        int[] AddItem(int itemId, int count, int inc)
+        int[] AddDeliveryPackageItem(int itemId, int count, int inc, bool assembler = true)
         {
-            if (itemId <= 0 || count <= 0 || !itemIndex.ContainsKey(itemId))
+            if (itemId <= 0 || count <= 0 || !packageItemIndex.ContainsKey(itemId))
                 return new int[2] { 0, 0 };
-            int index = itemIndex[itemId];
+            int index = packageItemIndex[itemId];
             if (index < 0 || deliveryPackage.grids[index].itemId != itemId)
                 return new int[2] { 0, 0 };
 
             int max_count = Math.Min(deliveryPackage.grids[index].recycleCount, deliveryPackage.grids[index].stackSizeModified);
+            if (assembler == false && itemId == hydrogenId)  // 当氢气储量超过阈值后，不再接收非制造设备的氢气，以防止阻塞原油裂解反应。
+                max_count = (int)(Math.Min(deliveryPackage.grids[index].recycleCount, deliveryPackage.grids[index].stackSizeModified) * hydrogenThreshold);
             int quota = max_count - deliveryPackage.grids[index].count;
             if (quota <= 0)
             {
@@ -841,7 +1004,7 @@ namespace PackageLogistic
             {
                 deliveryPackage.grids[index].count += count;
                 deliveryPackage.grids[index].inc += inc;
-                AutoSpray(index);
+                SprayDeliveryPackageItem(index);
                 return new int[2] { count, inc };
             }
             else
@@ -849,23 +1012,87 @@ namespace PackageLogistic
                 deliveryPackage.grids[index].count = max_count;
                 int realInc = SplitInc(count, inc, quota);
                 deliveryPackage.grids[index].inc += realInc;
-                AutoSpray(index);
+                SprayDeliveryPackageItem(index);
                 return new int[2] { quota, realInc };
             }
         }
 
         /// <summary>
-        /// 
+        /// 向星际物流运输站中放入物品
         /// </summary>
         /// <param name="itemId"></param>
         /// <param name="count"></param>
         /// <param name="inc"></param>
-        /// <returns>{实际取出物品数量， 实际取出物品增产量}</returns>
+        /// <param name="assembler">物品是否来源于制造设备</param>
+        /// <returns>{实际放入物品数量， 实际放入物品增产量}</returns>
+        int[] AddTransportItem(int itemId, int count, int inc, bool assembler = true)
+        {
+            if (itemId <= 0 || count <= 0 || !transportItemIndex.ContainsKey(itemId))
+                return new int[2] { 0, 0 };
+            int[] result = new int[2] { 0, 0 };
+            foreach (TransportStore store in transportItemIndex[itemId])
+            {
+                PlanetFactory pf = GameMain.data.factories[store.planetIndex];
+                StationComponent sc = pf.transport.stationPool[store.transportIndex];
+                StationStore ss = sc.storage[store.storageIndex];
+                if (ss.itemId != itemId)
+                    continue;
+                int quota = ss.max - ss.localOrder - ss.remoteOrder - ss.count;
+                if (assembler == false && itemId == hydrogenId)  // 当氢气储量超过阈值后，不再接收非制造设备的氢气，以防止阻塞原油裂解反应。
+                    quota = (int)(ss.max * hydrogenThreshold) - ss.localOrder - ss.remoteOrder - ss.count;
+                if (quota <= 0)
+                    continue;
+                else if (count <= quota)
+                {
+                    sc.storage[store.storageIndex].count += count;
+                    sc.storage[store.storageIndex].inc += inc;
+                    result[0] += count;
+                    result[1] += inc;
+                    count = 0;
+                    inc = 0;
+                    SprayTransportItem(store);
+                    break;
+                }
+                else
+                {
+                    sc.storage[store.storageIndex].count += quota;
+                    int realInc = SplitInc(count, inc, quota);
+                    sc.storage[store.storageIndex].inc += realInc;
+                    result[0] += quota;
+                    result[1] += realInc;
+                    count -= quota;
+                    inc -= realInc;
+                    SprayTransportItem(store);
+                }
+            }
+            return result;
+        }
+
+        //优先使用物流背包，其次星际物流塔
         int[] TakeItem(int itemId, int count)
         {
-            if (itemId <= 0 || count <= 0 || !itemIndex.ContainsKey(itemId))
+            int[] result = TakeDeliveryPackageItem(itemId, count);
+            if (result[0] == count)
+            {
+                return result;
+            }
+            int[] result1 = TakeTransportItem(itemId, count - result[0]);
+            result1[0] += result[0];
+            result1[1] += result[1];
+            return result1;
+        }
+
+        /// <summary>
+        /// 从物流背包中拿取物品
+        /// </summary>
+        /// <param name="itemId"></param>
+        /// <param name="count"></param>
+        /// <returns>{实际取出物品数量， 实际取出物品增产量}</returns>
+        int[] TakeDeliveryPackageItem(int itemId, int count)
+        {
+            if (itemId <= 0 || count <= 0 || !packageItemIndex.ContainsKey(itemId))
                 return new int[2] { 0, 0 };
-            int index = itemIndex[itemId];
+            int index = packageItemIndex[itemId];
             if (index < 0 || deliveryPackage.grids[index].itemId != itemId)
                 return new int[2] { 0, 0 };
             if (deliveryPackage.grids[index].count <= deliveryPackage.grids[index].requireCount)
@@ -887,7 +1114,46 @@ namespace PackageLogistic
             }
         }
 
-
+        /// <summary>
+        /// 从星际物流运输站中拿取物品
+        /// </summary>
+        /// <param name="itemId"></param>
+        /// <param name="count"></param>
+        /// <returns>{实际取出物品数量， 实际取出物品增产量}</returns>
+        int[] TakeTransportItem(int itemId, int count)
+        {
+            if (itemId <= 0 || count <= 0 || !transportItemIndex.ContainsKey(itemId))
+                return new int[2] { 0, 0 };
+            int[] result = new int[2] { 0, 0 };
+            foreach (TransportStore store in transportItemIndex[itemId])
+            {
+                PlanetFactory pf = GameMain.data.factories[store.planetIndex];
+                StationComponent sc = pf.transport.stationPool[store.transportIndex];
+                StationStore ss = sc.storage[store.storageIndex];
+                if (ss.itemId != itemId)
+                    continue;
+                if (ss.count <= 0)
+                    continue;
+                else if (count <= ss.count)
+                {
+                    int realInc = SplitInc(ss.count, ss.inc, count);
+                    sc.storage[store.storageIndex].count -= count;
+                    sc.storage[store.storageIndex].inc -= realInc;
+                    result[0] += count;
+                    result[1] += realInc;
+                    break;
+                }
+                else
+                {
+                    count -= ss.count;
+                    result[0] += ss.count;
+                    result[1] += ss.inc;
+                    sc.storage[store.storageIndex].count = 0;
+                    sc.storage[store.storageIndex].inc = 0;
+                }
+            }
+            return result;
+        }
         int SplitInc(int count, int inc, int expectCount)
         {
             int num1 = inc / count;
@@ -898,7 +1164,6 @@ namespace PackageLogistic
             inc -= num4;
             return num4;
         }
-
 
     }
 
