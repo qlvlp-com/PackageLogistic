@@ -7,6 +7,7 @@ using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
 using UnityEngine;
+using WinAPI;
 
 
 namespace PackageLogistic
@@ -58,11 +59,15 @@ namespace PackageLogistic
         private const int hydrogenId = 1120;
 
         private bool showGUI = false;
-        private Rect windowRect = new Rect(700, 250, 500, 400);
+        private Rect windowRect = new Rect(700, 250, 500, 500);
         private Texture2D windowTexture = new Texture2D(10, 10);
+        Dictionary<int, string> fuelOptions = new Dictionary<int, string>();
+        ConfigEntry<int> fuelId;
+        int selectedFuelIndex;
 
         void Start()
         {
+            hotKey = Config.Bind("窗口快捷键", "Key", new KeyboardShortcut(KeyCode.L, KeyCode.LeftControl));
             enableMod = Config.Bind<Boolean>("配置", "EnableMod", true, "启用MOD");
             autoSpray = Config.Bind<Boolean>("配置", "AutoSpray", true, "自动喷涂。自动使用物流背包里的增产剂对物流背包内的其它物品进行喷涂");
             costProliferator = Config.Bind<Boolean>("配置", "CostProliferator", true, "消耗增产剂。自动喷涂时消耗背包里的增产剂");
@@ -71,8 +76,18 @@ namespace PackageLogistic
             infBuildings = Config.Bind<Boolean>("配置", "InfBuildings", false, "无限建筑。物流背包内所有建筑无限数量");
             infSand = Config.Bind<Boolean>("配置", "InfSand", false, "无限沙土。沙土无限数量（固定为1G）");
             useStorege = Config.Bind<Boolean>("配置", "useStorege", true, "从储物箱和储液罐回收物品");
-            hotKey = Config.Bind("窗口快捷键", "Key", new KeyboardShortcut(KeyCode.L, KeyCode.LeftControl));
-
+            fuelId = Config.Bind<int>("配置", "fuelId", 0, "火力发电站燃料ID\n" +
+                "0:自动选择，精炼油和氢储量超60%时，谁多使用谁，否则使用煤，可防止原油裂解反应阻塞\n" +
+                "1006:煤, 1109:石墨, 1007:原油, 1114:精炼油, 1120:氢气, 1801:氢燃料棒, 1011:可燃冰");
+            fuelOptions.Add(0, "自动");
+            fuelOptions.Add(1006, "煤");
+            fuelOptions.Add(1109, "石墨");
+            fuelOptions.Add(1007, "原油");
+            fuelOptions.Add(1114, "精炼油");
+            fuelOptions.Add(1120, "氢气");
+            fuelOptions.Add(1801, "氢燃料棒");
+            fuelOptions.Add(1011, "可燃冰");
+            selectedFuelIndex = fuelOptions.Keys.ToList().FindIndex(id => id == fuelId.Value);
 
             windowTexture.SetPixels(Enumerable.Repeat(new Color(0, 0, 0, 1), 100).ToArray());
             windowTexture.Apply();
@@ -186,33 +201,46 @@ namespace PackageLogistic
         void WindowFunction(int windowID)
         {
             GUILayout.BeginVertical();
-            GUILayout.Space(20);
-            enableMod.Value = GUILayout.Toggle(enableMod.Value, "启用MOD");
+            GUILayout.Space(10);
             GUILayout.Label("启用或停止MOD运行");
+            enableMod.Value = GUILayout.Toggle(enableMod.Value, "启用MOD");
 
+            GUILayout.Space(10);
+            GUILayout.Label("自动使用物流背包里的增产剂对物流背包内的其它物品进行喷涂");
             GUILayout.BeginHorizontal();
             autoSpray.Value = GUILayout.Toggle(autoSpray.Value, "自动喷涂");
             costProliferator.Value = GUILayout.Toggle(costProliferator.Value, "消耗增产剂");
             GUILayout.EndHorizontal();
-            GUILayout.Label("自动使用物流背包里的增产剂对物流背包内的其它物品进行喷涂");
 
 
-            infBuildings.Value = GUILayout.Toggle(infBuildings.Value, "无限建筑");
+            GUILayout.Space(10);
             GUILayout.Label("物流背包内所有建筑无限数量");
+            infBuildings.Value = GUILayout.Toggle(infBuildings.Value, "无限建筑");
 
-            infVeins.Value = GUILayout.Toggle(infVeins.Value, "无限矿物");
+            GUILayout.Space(10);
             GUILayout.Label("物流背包内所有矿物无限数量");
+            infVeins.Value = GUILayout.Toggle(infVeins.Value, "无限矿物");
 
-            infSand.Value = GUILayout.Toggle(infSand.Value, "无限沙土");
+
+            GUILayout.Space(10);
             GUILayout.Label("沙土无限数量（固定为1G）");
+            infSand.Value = GUILayout.Toggle(infSand.Value, "无限沙土");
 
-            infItems.Value = GUILayout.Toggle(infItems.Value, "无限物品");
+
+            GUILayout.Space(10);
             GUILayout.Label("物流背包内所有物品无限数量（无法获取成就）");
+            infItems.Value = GUILayout.Toggle(infItems.Value, "无限物品");
+;
 
+            GUILayout.Space(10);
             useStorege.Value = GUILayout.Toggle(useStorege.Value, "从储物箱和储液罐回收物品");
 
+            GUILayout.Space(10);
+            GUILayout.Label("火力发电站燃料");
+            selectedFuelIndex = GUILayout.SelectionGrid(selectedFuelIndex, fuelOptions.Values.ToArray(), 4, GUI.skin.toggle);
+            fuelId.Value = fuelOptions.Keys.ToArray()[selectedFuelIndex];
+            GUILayout.Space(5);
             GUILayout.EndVertical();
-
             GUI.DragWindow();
         }
 
@@ -714,6 +742,73 @@ namespace PackageLogistic
             taskState["ProcessMiner"] = true;
         }
 
+        int thermalPowerPlantFuel()
+        {
+            Logger.LogDebug("thermalPowerPlantFuel");
+            if (fuelId.Value != 0)
+            {
+                return fuelId.Value;
+            }
+            //自动模式下精炼油和氢超60%时，谁多使用谁，否则使用煤
+            float p_1114 = 0.0f;
+            float p_1120 = 0.0f;
+            float max1114 = 0, max1120 = 0;
+            float count1114 = 0, count1120 = 0;
+            if (packageItemIndex.ContainsKey(1114))
+            {
+                var grid = deliveryPackage.grids[packageItemIndex[1114]];
+                max1114 += grid.stackSizeModified;
+                count1114 += grid.count;
+            }
+            if (transportItemIndex.ContainsKey(1114))
+            {
+                foreach (TransportStore store in transportItemIndex[1114])
+                {
+                    PlanetFactory pf = GameMain.data.factories[store.planetIndex];
+                    StationComponent sc = pf.transport.stationPool[store.transportIndex];
+                    StationStore ss = sc.storage[store.storageIndex];
+                    if (ss.itemId != 1114)
+                        continue;
+                    max1114 += ss.max;
+                    count1114 += ss.count;
+                }
+            }
+
+            if (packageItemIndex.ContainsKey(1120))
+            {
+                var grid = deliveryPackage.grids[packageItemIndex[1120]];
+                max1120 += grid.stackSizeModified;
+                count1120 += grid.count;
+            }
+            if (transportItemIndex.ContainsKey(1120))
+            {
+                foreach (TransportStore store in transportItemIndex[1120])
+                {
+                    PlanetFactory pf = GameMain.data.factories[store.planetIndex];
+                    StationComponent sc = pf.transport.stationPool[store.transportIndex];
+                    StationStore ss = sc.storage[store.storageIndex];
+                    if (ss.itemId != 1120)
+                        continue;
+                    max1120 += ss.max;
+                    count1120 += ss.count;
+                }
+            }
+            p_1114 = count1114 / max1114;
+            p_1120 = count1120 / max1120;
+            if (p_1114 >= p_1120 && p_1114 > 0.60)
+            {
+                return 1114; // 精炼油
+            }
+            else if (p_1120 >= p_1114 && p_1120 > 0.60)
+            {
+                return 1120; // 氢
+            }
+            else
+            {
+                return 1006; //煤
+            }
+        }
+
         //火力发电厂（煤）、核聚变电站、人造恒星、射线接受器
         void ProcessPowerGenerator(object state)
         {
@@ -749,31 +844,8 @@ namespace PackageLogistic
                     int fuelId = 0;
                     switch (pgc.fuelMask)
                     {
-                        case 1: //火力发电厂使用燃料顺序：精炼油和氢超60%时，谁多使用谁，否则使用煤
-                            float p_1114 = 0.0f;
-                            float p_1120 = 0.0f;
-                            if (packageItemIndex.ContainsKey(1114))
-                            {
-                                var grid = deliveryPackage.grids[packageItemIndex[1114]];
-                                p_1114 = (float)grid.count / (float)(grid.stackSizeModified);
-                            }
-                            if (packageItemIndex.ContainsKey(1120))
-                            {
-                                var grid = deliveryPackage.grids[packageItemIndex[1120]];
-                                p_1120 = (float)grid.count / (float)grid.stackSizeModified;
-                            }
-                            if (p_1114 >= p_1120 && p_1114 > 0.60)
-                            {
-                                fuelId = 1114; // 精炼油
-                            }
-                            else if (p_1120 >= p_1114 && p_1120 > 0.60)
-                            {
-                                fuelId = 1120; // 氢
-                            }
-                            else
-                            {
-                                fuelId = 1006; //煤
-                            }
+                        case 1:
+                            fuelId = thermalPowerPlantFuel();
                             break;
                         case 2: fuelId = 1802; break;
                         case 4: fuelId = 1803; break;
