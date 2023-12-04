@@ -7,7 +7,6 @@ using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
 using UnityEngine;
-using WinAPI;
 
 
 namespace PackageLogistic
@@ -32,7 +31,7 @@ namespace PackageLogistic
     {
         public const string GUID = "com.qlvlp.dsp.PackageLogistic";
         public const string NAME = "PackageLogistic";
-        public const string VERSION = "1.0.3";
+        public const string VERSION = "1.0.5";
 
         ConfigEntry<Boolean> autoSpray;
         ConfigEntry<Boolean> costProliferator;
@@ -47,6 +46,7 @@ namespace PackageLogistic
         DeliveryPackage deliveryPackage;
         Dictionary<int, int> packageItemIndex = new Dictionary<int, int>(); //<itemId,deliveryPackage.grids Index>
         Dictionary<int, List<TransportStore>> transportItemIndex = new Dictionary<int, List<TransportStore>>(); //<itemId, transportStore>
+        List<(int, int)> proliferators = new List<(int, int)>();
         Dictionary<int, int> incPool = new Dictionary<int, int>()
         {
             {1141, 0 },
@@ -56,7 +56,6 @@ namespace PackageLogistic
         Dictionary<string, bool> taskState = new Dictionary<string, bool>();
         int stackSize = 0;
         private const float hydrogenThreshold = 0.6f;
-        private const int hydrogenId = 1120;
 
         private bool showGUI = false;
         private Rect windowRect = new Rect(700, 250, 500, 500);
@@ -88,6 +87,10 @@ namespace PackageLogistic
             fuelOptions.Add(1801, "氢燃料棒");
             fuelOptions.Add(1011, "可燃冰");
             selectedFuelIndex = fuelOptions.Keys.ToList().FindIndex(id => id == fuelId.Value);
+
+            proliferators.Add((1143, 4));  //增产剂MK.III
+            proliferators.Add((1142, 2));  //增产剂MK.II
+            proliferators.Add((1141, 1));  //增产剂MK.I
 
             windowTexture.SetPixels(Enumerable.Repeat(new Color(0, 0, 0, 1), 100).ToArray());
             windowTexture.Apply();
@@ -154,7 +157,7 @@ namespace PackageLogistic
                                     break;
                                 else if ((now - startTime).TotalMilliseconds >= 1000)
                                 {
-                                    Logger.LogInfo("task state set exception!");
+                                    Logger.LogError("task state set exception!");
                                     break;
                                 }
                                 else
@@ -351,7 +354,7 @@ namespace PackageLogistic
                         if (infVeins.Value && IsVein(grid.itemId))  //无限矿物模式
                         {
                             // 在无限矿物模式下，为防止氢溢出导致原油裂解反应阻塞，氢储量百分比设置为blockThreshold
-                            if (grid.itemId == hydrogenId)
+                            if (grid.itemId == 1120)
                             {
                                 max_count = (int)(max_count * hydrogenThreshold);
                             }
@@ -409,7 +412,7 @@ namespace PackageLogistic
                                 if (infVeins.Value && IsVein(ss.itemId))  //无限矿物模式
                                 {
                                     // 在无限矿物模式下，为防止氢溢出导致原油裂解反应阻塞，氢储量百分比设置为blockThreshold
-                                    if (ss.itemId == hydrogenId)
+                                    if (ss.itemId == 1120)
                                     {
                                         sc.storage[storageIndex].count = (int)(ss.max * hydrogenThreshold);
                                     }
@@ -471,10 +474,6 @@ namespace PackageLogistic
             if (item.CanBuild)
                 return;
 
-            List<(int, int)> proliferators = new List<(int, int)>();
-            proliferators.Add((1143, 4));  //增产剂MK.III
-            proliferators.Add((1142, 2));  //增产剂MK.II
-            proliferators.Add((1141, 1));  //增产剂MK.I
             foreach (var proliferator in proliferators)
             {
                 int expectInc = grid.count * proliferator.Item2 - grid.inc;
@@ -515,10 +514,6 @@ namespace PackageLogistic
             if (item.CanBuild)
                 return;
 
-            List<(int, int)> proliferators = new List<(int, int)>();
-            proliferators.Add((1143, 4));  //增产剂MK.III
-            proliferators.Add((1142, 2));  //增产剂MK.II
-            proliferators.Add((1141, 1));  //增产剂MK.I
             foreach (var proliferator in proliferators)
             {
                 int expectInc = ss.count * proliferator.Item2 - ss.inc;
@@ -590,7 +585,7 @@ namespace PackageLogistic
                         for (int i = sc.storage.Length - 1; i >= 0; i--)
                         {
                             StationStore ss = sc.storage[i];
-                            if (ss.itemId <= 0 || !packageItemIndex.ContainsKey(ss.itemId)) continue;
+                            if (ss.itemId <= 0) continue;
                             if (ss.localLogic == ELogisticStorage.Supply && ss.count > 0)
                             {
                                 int[] result;
@@ -630,7 +625,7 @@ namespace PackageLogistic
                     for (int i = sc.grids.Length - 1; i >= 0; i--)
                     {
                         StorageComponent.GRID grid = sc.grids[i];
-                        if (grid.itemId <= 0 || grid.count <= 0 || !packageItemIndex.ContainsKey(grid.itemId)) continue;
+                        if (grid.itemId <= 0 || grid.count <= 0) continue;
                         int[] result = AddItem(grid.itemId, grid.count, grid.inc, false);
                         if (result[0] != 0)
                         {
@@ -644,7 +639,7 @@ namespace PackageLogistic
                 for (int i = pf.factoryStorage.tankPool.Length - 1; i >= 0; --i)
                 {
                     TankComponent tc = pf.factoryStorage.tankPool[i];
-                    if (tc.id == 0 || tc.fluidId == 0 || tc.fluidCount == 0 || !packageItemIndex.ContainsKey(tc.fluidId)) continue;
+                    if (tc.id == 0 || tc.fluidId == 0 || tc.fluidCount == 0) continue;
                     int[] result = AddItem(tc.fluidId, tc.fluidCount, tc.fluidInc, false);
                     pf.factoryStorage.tankPool[i].fluidCount -= result[0];
                     pf.factoryStorage.tankPool[i].fluidInc -= result[1];
@@ -718,19 +713,18 @@ namespace PackageLogistic
                         for (int i = sc.storage.Length - 1; i >= 0; i--)
                         {
                             StationStore ss = sc.storage[i];
-                            if (ss.itemId <= 0 || ss.count <= 0 || !packageItemIndex.ContainsKey(ss.itemId) || ss.remoteLogic != ELogisticStorage.Supply)
+                            if (ss.itemId <= 0 || ss.count <= 0 || ss.remoteLogic != ELogisticStorage.Supply)
                                 continue;
 
                             int[] result;
                             result = AddItem(ss.itemId, ss.count, 0, false);
-
                             sc.storage[i].count -= result[0];
                         }
                     }
                     else if (sc.isVeinCollector)  // 大型采矿机
                     {
                         StationStore ss = sc.storage[0];
-                        if (ss.itemId <= 0 || ss.count <= 0 || !packageItemIndex.ContainsKey(ss.itemId) || ss.localLogic != ELogisticStorage.Supply)
+                        if (ss.itemId <= 0 || ss.count <= 0 || ss.localLogic != ELogisticStorage.Supply)
                             continue;
 
                         int[] result = AddItem(ss.itemId, ss.count, 0, false);
@@ -745,14 +739,14 @@ namespace PackageLogistic
         int thermalPowerPlantFuel()
         {
             Logger.LogDebug("thermalPowerPlantFuel");
-            if (fuelId.Value != 0)
+            if (fuelId.Value != 0)  //手动选择燃料
             {
                 return fuelId.Value;
             }
             //自动模式下精炼油和氢超60%时，谁多使用谁，否则使用煤
             float p_1114 = 0.0f;
             float p_1120 = 0.0f;
-            float max1114 = 0, max1120 = 0;
+            float max1114 = 1, max1120 = 1;
             float count1114 = 0, count1120 = 0;
             if (packageItemIndex.ContainsKey(1114))
             {
@@ -998,41 +992,6 @@ namespace PackageLogistic
         }
 
 
-        // 向背包内放入氢气，为防止氢气溢出阻塞原油裂解反应，氢气储量百分比最大为hydrogenThreshold
-        //int[] AddHydrogen(int itemId, int count, int inc)
-        //{
-        //    if (itemId <= 0 || count <= 0 || !packageItemIndex.ContainsKey(itemId))
-        //        return new int[2] { 0, 0 };
-        //    int index = packageItemIndex[itemId];
-        //    if (index < 0 || deliveryPackage.grids[index].itemId != itemId)
-        //        return new int[2] { 0, 0 };
-
-        //    int max_count = (int)(Math.Min(deliveryPackage.grids[index].recycleCount, deliveryPackage.grids[index].stackSizeModified) * hydrogenThreshold);
-        //    int quota = max_count - deliveryPackage.grids[index].count;
-        //    if (quota <= 0)
-        //    {
-        //        return new int[2] { 0, 0 };
-        //    }
-        //    if (count <= quota)
-        //    {
-        //        deliveryPackage.grids[index].count += count;
-        //        deliveryPackage.grids[index].inc += inc;
-        //        SprayDeliveryPackageItem(index);
-        //        return new int[2] { count, inc };
-        //    }
-        //    else
-        //    {
-        //        deliveryPackage.grids[index].count = max_count;
-        //        int realInc = SplitInc(count, inc, quota);
-        //        deliveryPackage.grids[index].inc += realInc;
-        //        SprayDeliveryPackageItem(index);
-        //        return new int[2] { quota, realInc };
-        //    }
-        //}
-
-
-        //优先使用物流背包，其次星际物流塔
-
         //优先使用物流背包，其次星际物流塔
         int[] AddItem(int itemId, int count, int inc, bool assembler = true)
         {
@@ -1065,7 +1024,7 @@ namespace PackageLogistic
                 return new int[2] { 0, 0 };
 
             int max_count = Math.Min(deliveryPackage.grids[index].recycleCount, deliveryPackage.grids[index].stackSizeModified);
-            if (assembler == false && itemId == hydrogenId)  // 当氢气储量超过阈值后，不再接收非制造设备的氢气，以防止阻塞原油裂解反应。
+            if (assembler == false && itemId == 1120)  // 当氢气储量超过阈值后，不再接收非制造设备的氢气，以防止阻塞原油裂解反应。
                 max_count = (int)(Math.Min(deliveryPackage.grids[index].recycleCount, deliveryPackage.grids[index].stackSizeModified) * hydrogenThreshold);
             int quota = max_count - deliveryPackage.grids[index].count;
             if (quota <= 0)
@@ -1110,7 +1069,7 @@ namespace PackageLogistic
                 if (ss.itemId != itemId)
                     continue;
                 int quota = ss.max - ss.localOrder - ss.remoteOrder - ss.count;
-                if (assembler == false && itemId == hydrogenId)  // 当氢气储量超过阈值后，不再接收非制造设备的氢气，以防止阻塞原油裂解反应。
+                if (assembler == false && itemId == 1120)  // 当氢气储量超过阈值后，不再接收非制造设备的氢气，以防止阻塞原油裂解反应。
                     quota = (int)(ss.max * hydrogenThreshold) - ss.localOrder - ss.remoteOrder - ss.count;
                 if (quota <= 0)
                     continue;
