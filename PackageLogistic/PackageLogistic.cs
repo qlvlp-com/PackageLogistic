@@ -31,7 +31,7 @@ namespace PackageLogistic
     {
         public const string GUID = "com.qlvlp.dsp.PackageLogistic";
         public const string NAME = "PackageLogistic";
-        public const string VERSION = "1.0.6";
+        public const string VERSION = "1.0.7";
 
         private ConfigEntry<Boolean> autoSpray;
         private ConfigEntry<Boolean> costProliferator;
@@ -61,13 +61,16 @@ namespace PackageLogistic
         private const float hydrogenThreshold = 0.6f;
 
         private bool showGUI = false;
-        private Rect windowRect = new Rect(700, 250, 500, 500);
+        private Rect windowRect = new Rect(700, 250, 500, 300);
         private readonly Texture2D windowTexture = new Texture2D(10, 10);
+        private int selectedPanel = 0;
 
         private readonly Dictionary<int, string> fuelOptions = new Dictionary<int, string>();
         private ConfigEntry<int> fuelId;
         private int selectedFuelIndex;
 
+        private ConfigEntry<Boolean> infFleet;
+        private ConfigEntry<Boolean> infAmmo;
         Dictionary<EAmmoType, List<int>> ammos = new Dictionary<EAmmoType, List<int>>();
 
         void Start()
@@ -101,6 +104,8 @@ namespace PackageLogistic
             windowTexture.SetPixels(Enumerable.Repeat(new Color(0, 0, 0, 1), 100).ToArray());
             windowTexture.Apply();
 
+            infAmmo = Config.Bind<Boolean>("配置", "InfAmmo", false, "无限弹药。物流背包和星际运输站内弹药无限数量");
+            infFleet = Config.Bind<Boolean>("配置", "infFleet", false, "无限舰队。物流背包和星际运输站内无人机与舰艇无限数量");
             ammos.Add(EAmmoType.Bullet, new List<int> { 1603, 1602, 1601 });
             ammos.Add(EAmmoType.Missile, new List<int> { 1611, 1610, 1609 });
             ammos.Add(EAmmoType.Cannon, new List<int> { 1606, 1605, 1604 });
@@ -213,55 +218,93 @@ namespace PackageLogistic
             if (showGUI)
             {
                 GUI.DrawTexture(windowRect, windowTexture);
-                windowRect = GUI.Window(0, windowRect, WindowFunction, "PackageLogistic 设置");
+                windowRect = GUI.Window(0, windowRect, WindowFunction, string.Format("{0} {1}", NAME, VERSION));
             }
         }
 
         void WindowFunction(int windowID)
         {
+            string[] panels = { "主选项", "物品", "战斗" };
+            selectedPanel = GUILayout.Toolbar(selectedPanel, panels);
+            switch (selectedPanel)
+            {
+                case 0:
+                    MainPanel(); break;
+                case 1:
+                    ItemPanel(); break;
+                case 2:
+                    FightPanel(); break;
+            }
+            GUI.DragWindow();
+        }
+
+        void MainPanel()
+        {
             GUILayout.BeginVertical();
+
             GUILayout.Space(10);
             GUILayout.Label("启用或停止MOD运行");
             enableMod.Value = GUILayout.Toggle(enableMod.Value, "启用MOD");
 
-            GUILayout.Space(10);
+            GUILayout.Space(15);
             GUILayout.Label("自动使用物流背包里的增产剂对物流背包内的其它物品进行喷涂");
             GUILayout.BeginHorizontal();
             autoSpray.Value = GUILayout.Toggle(autoSpray.Value, "自动喷涂");
             costProliferator.Value = GUILayout.Toggle(costProliferator.Value, "消耗增产剂");
             GUILayout.EndHorizontal();
 
-
-            GUILayout.Space(10);
-            GUILayout.Label("物流背包内所有建筑无限数量");
-            infBuildings.Value = GUILayout.Toggle(infBuildings.Value, "无限建筑");
-
-            GUILayout.Space(10);
-            GUILayout.Label("物流背包内所有矿物无限数量");
-            infVeins.Value = GUILayout.Toggle(infVeins.Value, "无限矿物");
-
-
-            GUILayout.Space(10);
-            GUILayout.Label("沙土无限数量（固定为1G）");
-            infSand.Value = GUILayout.Toggle(infSand.Value, "无限沙土");
-
-
-            GUILayout.Space(10);
-            GUILayout.Label("物流背包内所有物品无限数量（无法获取成就）");
-            infItems.Value = GUILayout.Toggle(infItems.Value, "无限物品");
-;
-
-            GUILayout.Space(10);
+            GUILayout.Space(15);
             useStorege.Value = GUILayout.Toggle(useStorege.Value, "从储物箱和储液罐回收物品");
 
-            GUILayout.Space(10);
+            GUILayout.Space(15);
             GUILayout.Label("火力发电站燃料");
             selectedFuelIndex = GUILayout.SelectionGrid(selectedFuelIndex, fuelOptions.Values.ToArray(), 4, GUI.skin.toggle);
             fuelId.Value = fuelOptions.Keys.ToArray()[selectedFuelIndex];
+
             GUILayout.Space(5);
             GUILayout.EndVertical();
-            GUI.DragWindow();
         }
+
+        void ItemPanel()
+        {
+            GUILayout.BeginVertical();
+
+            GUILayout.Space(10);
+            GUILayout.Label("物流背包和星际运输站内所有建筑无限数量");
+            infBuildings.Value = GUILayout.Toggle(infBuildings.Value, "无限建筑");
+
+            GUILayout.Space(15);
+            GUILayout.Label("物流背包和星际运输站内所有矿物无限数量");
+            infVeins.Value = GUILayout.Toggle(infVeins.Value, "无限矿物");
+
+            GUILayout.Space(15);
+            GUILayout.Label("物流背包和星际运输站内所有物品无限数量(无法获取成就)");
+            infItems.Value = GUILayout.Toggle(infItems.Value, "无限物品");
+
+            GUILayout.Space(15);
+            GUILayout.Label("沙土无限数量（固定为1G）");
+            infSand.Value = GUILayout.Toggle(infSand.Value, "无限沙土");
+
+            GUILayout.Space(5);
+            GUILayout.EndVertical();
+        }
+
+        void FightPanel()
+        {
+            GUILayout.BeginVertical();
+
+            GUILayout.Space(10);
+            GUILayout.Label("物流背包和星际运输站内所有弹药无限数量");
+            infAmmo.Value = GUILayout.Toggle(infAmmo.Value, "无限弹药");
+
+            GUILayout.Space(15);
+            GUILayout.Label("物流背包和星际运输站内无人机与舰艇无限数量");
+            infFleet.Value = GUILayout.Toggle(infFleet.Value, "无限舰队");
+
+            GUILayout.Space(5);
+            GUILayout.EndVertical();
+        }
+
 
         void CheckTech()
         {
@@ -381,6 +424,14 @@ namespace PackageLogistic
                         {
                             deliveryPackage.grids[index].count = max_count;
                         }
+                        if (infAmmo.Value && item.isAmmo)   //无限弹药模式
+                        {
+                            deliveryPackage.grids[index].count = max_count;
+                        }
+                        if (infFleet.Value && item.isFighter)  //无限舰队模式
+                        {
+                            deliveryPackage.grids[index].count = max_count;
+                        }
                     }
 
                     SprayDeliveryPackageItem(index);
@@ -419,7 +470,6 @@ namespace PackageLogistic
                                 sc.storage[storageIndex].max = Math.Min(item.StackSize * 10, ss.max);
                             }
 
-
                             if (infItems.Value)  // 无限物品模式
                             {
                                 sc.storage[storageIndex].count = ss.max;
@@ -438,8 +488,15 @@ namespace PackageLogistic
                                         sc.storage[storageIndex].count = ss.max;
                                     }
                                 }
-
                                 if (infBuildings.Value && item.CanBuild)  //无限建筑模式
+                                {
+                                    sc.storage[storageIndex].count = ss.max;
+                                }
+                                if (infAmmo.Value && item.isAmmo)   //无限弹药模式
+                                {
+                                    sc.storage[storageIndex].count = ss.max;
+                                }
+                                if (infFleet.Value && item.isFighter)  //无限舰队模式
                                 {
                                     sc.storage[storageIndex].count = ss.max;
                                 }
@@ -888,7 +945,7 @@ namespace PackageLogistic
                                 fuelId = 1804;
                             else
                                 fuelId = 1803;
-                             break;
+                            break;
                     }
                     if (fuelId != pgc.fuelId && pgc.fuelCount == 0)
                     {
@@ -1067,7 +1124,7 @@ namespace PackageLogistic
         void ProcessBattleBase(object state)
         {
             Logger.LogDebug("ProcessBattleBase");
-            int[] fighters = {5103,5102,5101};
+            int[] fighters = { 5103, 5102, 5101 };
             for (int pIndex = GameMain.data.factories.Length - 1; pIndex >= 0; pIndex--)
             {
                 PlanetFactory pf = GameMain.data.factories[pIndex];
@@ -1079,7 +1136,7 @@ namespace PackageLogistic
 
                     //添加战斗无人机，优先添加高级别无人机
                     ModuleFleet fleet = bbc.combatModule.moduleFleets[0];
-                    for(int index=fleet.fighters.Length-1; index >= 0; index--)
+                    for (int index = fleet.fighters.Length - 1; index >= 0; index--)
                     {
                         ModuleFighter fighter = fleet.fighters[index];
                         if (fighter.count == 0)

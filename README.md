@@ -1,8 +1,27 @@
 # PackageLogistic
+本mod旨在通过物流背包和星际物流运输站来提供物品收发能力，减少传送带和分拣器的使用，这在一定程度上减少了游戏性，建议通关一次后再使用本mod。
 
-本mod旨在减少游戏内传送带和分拣器使用量，提高游戏帧率，但在一定程度上减少了游戏性，建议通关一次后再使用本mod。
+## 快捷键
+ctrl+L
+
+## 获取方式
+### github
+https://github.com/qlvlp-com/PackageLogistic
+### 百度网盘
+https://pan.baidu.com/s/1GoVky8FkgsrVaxNZJ3E2Mg?pwd=g3sp
+### thunderstore
+https://dsp.thunderstore.io/package/qlvlp/PackageLogistic/
+
+## 使用介绍
+【《戴森球计划》物流背包MOD 黑雾崛起适配更新】
+ https://www.bilibili.com/video/BV1Ye411k7Ws/?share_source=copy_web&vd_source=e98c885722228bac750b1f4747eee0c2
 
 ## 版本
+### version 1.0.7
+1. 新增无限弹药功能
+2. 新增无限舰队功能
+3. 修改了UI界面
+
 ### version 1.0.6
 适配黑雾更新
 1. 自动供弹：自动为各类防御设施供给弹药，优先使用高级别弹药
@@ -37,15 +56,6 @@
 背包中非建筑物品的堆叠数量可随背包科技等级解锁而提升，最大值由10000更改为50000。
 
 ### version 1.0.0
-实现基本功能
-
-## 快捷键
-ctrl+L
-
-## 配置文件
-默认路径：BepInEx/config/com.qlvlp.dsp.PackageLogistic
-
-## 功能
 1. 自动从背包中将生产原料投放至生产设备，自动从生产设备回收产品。
 2. 自动喷涂，自动使用物流背包里的增产剂对物流背包内的其他产品进行喷涂，可设置是否消耗增产剂。
 3. 无限矿物，通过物流背包获取无限矿物。
@@ -53,20 +63,11 @@ ctrl+L
 5. 无限物品，通过物流背包获取无限物品（无法获取成就）。
 6. 无限沙土，沙土数量固定为最大值1G。
 
-## 备注：
-为了防止氢和原油溢出，导致原油分解阻塞
-1. 在无限矿物模式下物流背包中氢储量最大百分比为60%，手动存放不限制。
-2. 当氢气储量百分比超过60%时，将不再从物流塔回收氢气，不再从轨道采集器回收氢气。
-2. 火力发电厂使用燃料顺序：精炼油和氢超60%时，谁多使用谁，否则使用煤。
+## 配置文件
+默认路径：BepInEx/config/com.qlvlp.dsp.PackageLogistic
 
 ## 安装
 ### 依赖
 本mod依赖BepInEx 5。
 ### 安装
 复制PackageLogistic.dll文件至BepInEx/plugins目录下即可。
-
-## 项目主页
-### github
-https://github.com/qlvlp-com/PackageLogistic
-### 百度网盘
-https://pan.baidu.com/s/1GoVky8FkgsrVaxNZJ3E2Mg?pwd=g3sp
