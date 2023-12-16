@@ -70,9 +70,3 @@ D:\projects\PackageLogistic\bin\Release\0Harmony.xml
 D:\projects\PackageLogistic\bin\Release\BepInEx.xml
 D:\projects\PackageLogistic\bin\Release\MonoMod.Utils.xml
 D:\projects\PackageLogistic\bin\Release\MonoMod.RuntimeDetour.xml
-C:\Program Files (x86)\Steam\steamapps\common\Dyson Sphere Program\BepInEx\plugins\PackageLogistic.dll
-C:\Program Files (x86)\Steam\steamapps\common\Dyson Sphere Program\BepInEx\plugins\PackageLogistic.pdb
-D:\projects\PackageLogistic\obj\Release\PackageLogistic.csproj.AssemblyReference.cache
-D:\projects\PackageLogistic\obj\Release\PackageLogistic.csproj.CoreCompileInputs.cache
-D:\projects\PackageLogistic\obj\Release\PackageLogistic.dll
-D:\projects\PackageLogistic\obj\Release\PackageLogistic.pdb

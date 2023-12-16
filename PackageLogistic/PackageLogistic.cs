@@ -12,13 +12,13 @@ using UnityEngine;
 namespace PackageLogistic
 {
 
-    struct TransportStore
+    struct TransportItemIndex
     {
         public int planetIndex;
         public int transportIndex;
         public int storageIndex;
 
-        public TransportStore(int planetIndex, int transportIndex, int storageIndex) : this()
+        public TransportItemIndex(int planetIndex, int transportIndex, int storageIndex) : this()
         {
             this.planetIndex = planetIndex;
             this.transportIndex = transportIndex;
@@ -31,38 +31,44 @@ namespace PackageLogistic
     {
         public const string GUID = "com.qlvlp.dsp.PackageLogistic";
         public const string NAME = "PackageLogistic";
-        public const string VERSION = "1.0.5";
+        public const string VERSION = "1.0.6";
 
-        ConfigEntry<Boolean> autoSpray;
-        ConfigEntry<Boolean> costProliferator;
-        ConfigEntry<Boolean> infVeins;
-        ConfigEntry<Boolean> infItems;
-        ConfigEntry<Boolean> infSand;
-        ConfigEntry<Boolean> infBuildings;
-        ConfigEntry<Boolean> useStorege;
-        ConfigEntry<KeyboardShortcut> hotKey;
-        ConfigEntry<Boolean> enableMod;
+        private ConfigEntry<Boolean> autoSpray;
+        private ConfigEntry<Boolean> costProliferator;
+        private ConfigEntry<Boolean> infVeins;
+        private ConfigEntry<Boolean> infItems;
+        private ConfigEntry<Boolean> infSand;
+        private ConfigEntry<Boolean> infBuildings;
+        private ConfigEntry<Boolean> useStorege;
+        private ConfigEntry<KeyboardShortcut> hotKey;
+        private ConfigEntry<Boolean> enableMod;
 
-        DeliveryPackage deliveryPackage;
-        Dictionary<int, int> packageItemIndex = new Dictionary<int, int>(); //<itemId,deliveryPackage.grids Index>
-        Dictionary<int, List<TransportStore>> transportItemIndex = new Dictionary<int, List<TransportStore>>(); //<itemId, transportStore>
-        List<(int, int)> proliferators = new List<(int, int)>();
-        Dictionary<int, int> incPool = new Dictionary<int, int>()
+        private DeliveryPackage deliveryPackage;
+        private Dictionary<int, int> packageItems = new Dictionary<int, int>(); //<itemId,deliveryPackage.grids Index>
+        private Dictionary<int, List<TransportItemIndex>> transportItems = new Dictionary<int, List<TransportItemIndex>>(); //<itemId, TransportItemIndex>
+
+        private readonly List<(int, int)> proliferators = new List<(int, int)>();
+        private readonly Dictionary<int, int> incPool = new Dictionary<int, int>()
         {
             {1141, 0 },
             {1142, 0 },
             {1143, 0 }
         };
-        Dictionary<string, bool> taskState = new Dictionary<string, bool>();
-        int stackSize = 0;
+
+        private readonly Dictionary<string, bool> taskState = new Dictionary<string, bool>();
+
+        private int stackSize = 0;
         private const float hydrogenThreshold = 0.6f;
 
         private bool showGUI = false;
         private Rect windowRect = new Rect(700, 250, 500, 500);
-        private Texture2D windowTexture = new Texture2D(10, 10);
-        Dictionary<int, string> fuelOptions = new Dictionary<int, string>();
-        ConfigEntry<int> fuelId;
-        int selectedFuelIndex;
+        private readonly Texture2D windowTexture = new Texture2D(10, 10);
+
+        private readonly Dictionary<int, string> fuelOptions = new Dictionary<int, string>();
+        private ConfigEntry<int> fuelId;
+        private int selectedFuelIndex;
+
+        Dictionary<EAmmoType, List<int>> ammos = new Dictionary<EAmmoType, List<int>>();
 
         void Start()
         {
@@ -94,6 +100,12 @@ namespace PackageLogistic
 
             windowTexture.SetPixels(Enumerable.Repeat(new Color(0, 0, 0, 1), 100).ToArray());
             windowTexture.Apply();
+
+            ammos.Add(EAmmoType.Bullet, new List<int> { 1603, 1602, 1601 });
+            ammos.Add(EAmmoType.Missile, new List<int> { 1611, 1610, 1609 });
+            ammos.Add(EAmmoType.Cannon, new List<int> { 1606, 1605, 1604 });
+            ammos.Add(EAmmoType.Plasma, new List<int> { 1608, 1607 });
+
             new Thread(() =>
             {
                 Logger.LogInfo("PackageLogistic start!");
@@ -144,6 +156,11 @@ namespace PackageLogistic
                             ThreadPool.QueueUserWorkItem(ProcessEjector, taskState);
                             taskState["ProcessLab"] = false;
                             ThreadPool.QueueUserWorkItem(ProcessLab, taskState);
+                            taskState["ProcessTurret"] = false;
+                            ThreadPool.QueueUserWorkItem(ProcessTurret, taskState);
+                            taskState["ProcessBattleBase"] = false;
+                            ThreadPool.QueueUserWorkItem(ProcessBattleBase, taskState);
+
                             var keys = new List<string>(taskState.Keys);
                             while (true)
                             {
@@ -167,8 +184,8 @@ namespace PackageLogistic
                     }
                     catch (Exception ex)
                     {
-                        Logger.LogInfo("PackageLogistic exception!");
-                        Logger.LogInfo(ex.ToString());
+                        Logger.LogError("PackageLogistic exception!");
+                        Logger.LogError(ex.ToString());
                     }
                     finally
                     {
@@ -190,7 +207,6 @@ namespace PackageLogistic
                 showGUI = !showGUI;
             }
         }
-
 
         void OnGUI()
         {
@@ -326,16 +342,17 @@ namespace PackageLogistic
         void CreateDeliveryPackageItemIndex()
         {
             Logger.LogDebug("CreateDeliveryPackageItemIndex");
+            packageItems = new Dictionary<int, int>();
             for (int index = 0; index < deliveryPackage.gridLength; index++)
             {
                 DeliveryPackage.GRID grid = deliveryPackage.grids[index];
                 int max_count = Math.Min(grid.recycleCount, grid.stackSizeModified);
                 if (grid.itemId > 0)
                 {
-                    if (!packageItemIndex.ContainsKey(grid.itemId))
-                        packageItemIndex.Add(grid.itemId, index);
+                    if (!packageItems.ContainsKey(grid.itemId))
+                        packageItems.Add(grid.itemId, index);
                     else
-                        packageItemIndex[grid.itemId] = index;
+                        packageItems[grid.itemId] = index;
 
 
                     ItemProto item = LDB.items.Select(grid.itemId);
@@ -374,7 +391,7 @@ namespace PackageLogistic
         void CreateTransportItemIndex()
         {
             Logger.LogDebug("CreateTransportItemIndex");
-            transportItemIndex = new Dictionary<int, List<TransportStore>>();
+            transportItems = new Dictionary<int, List<TransportItemIndex>>();
             for (int planetIndex = GameMain.data.factories.Length - 1; planetIndex >= 0; planetIndex--)
             {
                 PlanetFactory pf = GameMain.data.factories[planetIndex];
@@ -389,12 +406,12 @@ namespace PackageLogistic
                         {
                             StationStore ss = sc.storage[storageIndex];
                             if (ss.itemId <= 0) continue;
-                            if (!transportItemIndex.ContainsKey(ss.itemId))
+                            if (!transportItems.ContainsKey(ss.itemId))
                             {
-                                transportItemIndex[ss.itemId] = new List<TransportStore>();
+                                transportItems[ss.itemId] = new List<TransportItemIndex>();
                             }
-                            TransportStore store = new TransportStore(planetIndex, transportIndex, storageIndex);
-                            transportItemIndex[ss.itemId].Add(new TransportStore(planetIndex, transportIndex, storageIndex));
+                            TransportItemIndex store = new TransportItemIndex(planetIndex, transportIndex, storageIndex);
+                            transportItems[ss.itemId].Add(new TransportItemIndex(planetIndex, transportIndex, storageIndex));
 
                             ItemProto item = LDB.items.Select(ss.itemId);  //建筑物储量最大值设置为物品默认堆叠值
                             if (item.CanBuild)
@@ -433,6 +450,30 @@ namespace PackageLogistic
                     }
                 }
             }
+        }
+
+        bool HasItem(int itemId)
+        {
+            if (packageItems.ContainsKey(itemId))
+            {
+                int index = packageItems[itemId];
+                if (deliveryPackage.grids[index].count > 0)
+                    return true;
+            }
+            else if (transportItems.ContainsKey(itemId))
+            {
+                foreach (TransportItemIndex store in transportItems[itemId])
+                {
+                    PlanetFactory pf = GameMain.data.factories[store.planetIndex];
+                    StationComponent sc = pf.transport.stationPool[store.transportIndex];
+                    StationStore ss = sc.storage[store.storageIndex];
+                    if (ss.count > 0)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
         }
 
         bool IsVein(int itemId)
@@ -491,7 +532,7 @@ namespace PackageLogistic
         /// 对星际物流塔内物品（建筑物除外）进行增产剂喷涂，优先使用高阶增产剂。
         /// </summary>
         /// <param name="store"></param>
-        void SprayTransportItem(TransportStore store)
+        void SprayTransportItem(TransportItemIndex store)
         {
             if (!autoSpray.Value)
                 return;
@@ -736,7 +777,7 @@ namespace PackageLogistic
             taskState["ProcessMiner"] = true;
         }
 
-        int thermalPowerPlantFuel()
+        int ThermalPowerPlantFuel()
         {
             Logger.LogDebug("thermalPowerPlantFuel");
             if (fuelId.Value != 0)  //手动选择燃料
@@ -748,15 +789,15 @@ namespace PackageLogistic
             float p_1120 = 0.0f;
             float max1114 = 1, max1120 = 1;
             float count1114 = 0, count1120 = 0;
-            if (packageItemIndex.ContainsKey(1114))
+            if (packageItems.ContainsKey(1114))
             {
-                var grid = deliveryPackage.grids[packageItemIndex[1114]];
+                var grid = deliveryPackage.grids[packageItems[1114]];
                 max1114 += grid.stackSizeModified;
                 count1114 += grid.count;
             }
-            if (transportItemIndex.ContainsKey(1114))
+            if (transportItems.ContainsKey(1114))
             {
-                foreach (TransportStore store in transportItemIndex[1114])
+                foreach (TransportItemIndex store in transportItems[1114])
                 {
                     PlanetFactory pf = GameMain.data.factories[store.planetIndex];
                     StationComponent sc = pf.transport.stationPool[store.transportIndex];
@@ -768,15 +809,15 @@ namespace PackageLogistic
                 }
             }
 
-            if (packageItemIndex.ContainsKey(1120))
+            if (packageItems.ContainsKey(1120))
             {
-                var grid = deliveryPackage.grids[packageItemIndex[1120]];
+                var grid = deliveryPackage.grids[packageItems[1120]];
                 max1120 += grid.stackSizeModified;
                 count1120 += grid.count;
             }
-            if (transportItemIndex.ContainsKey(1120))
+            if (transportItems.ContainsKey(1120))
             {
-                foreach (TransportStore store in transportItemIndex[1120])
+                foreach (TransportItemIndex store in transportItems[1120])
                 {
                     PlanetFactory pf = GameMain.data.factories[store.planetIndex];
                     StationComponent sc = pf.transport.stationPool[store.transportIndex];
@@ -839,10 +880,15 @@ namespace PackageLogistic
                     switch (pgc.fuelMask)
                     {
                         case 1:
-                            fuelId = thermalPowerPlantFuel();
+                            fuelId = ThermalPowerPlantFuel();
                             break;
                         case 2: fuelId = 1802; break;
-                        case 4: fuelId = 1803; break;
+                        case 4:
+                            if (HasItem(1804))
+                                fuelId = 1804;
+                            else
+                                fuelId = 1803;
+                             break;
                     }
                     if (fuelId != pgc.fuelId && pgc.fuelCount == 0)
                     {
@@ -991,6 +1037,85 @@ namespace PackageLogistic
             taskState["ProcessLab"] = true;
         }
 
+        // 高斯机枪塔,导弹防御塔，聚爆加农炮，磁化电浆炮
+        void ProcessTurret(object state)
+        {
+            Logger.LogDebug("ProcessTurret");
+            for (int pIndex = GameMain.data.factories.Length - 1; pIndex >= 0; pIndex--)
+            {
+                PlanetFactory pf = GameMain.data.factories[pIndex];
+                if (pf == null) continue;
+                for (int index = pf.defenseSystem.turrets.buffer.Length - 1; index >= 0; index--)
+                {
+                    TurretComponent tc = pf.defenseSystem.turrets.buffer[index];
+                    if (tc.id == 0 || tc.type == ETurretType.Laser || tc.ammoType == EAmmoType.None || tc.itemCount > 0 || tc.bulletCount > 0) continue;
+                    foreach (int itemId in ammos[tc.ammoType])
+                    {
+                        int[] result = TakeItem(itemId, 50 - tc.itemCount);
+                        if (result[0] != 0)
+                        {
+                            pf.defenseSystem.turrets.buffer[index].SetNewItem(itemId, (short)result[0], (short)result[1]);
+                            break;
+                        }
+                    }
+                }
+            }
+            taskState["ProcessTurret"] = true;
+        }
+
+        // 战场分析基站
+        void ProcessBattleBase(object state)
+        {
+            Logger.LogDebug("ProcessBattleBase");
+            int[] fighters = {5103,5102,5101};
+            for (int pIndex = GameMain.data.factories.Length - 1; pIndex >= 0; pIndex--)
+            {
+                PlanetFactory pf = GameMain.data.factories[pIndex];
+                if (pf == null) continue;
+                for (int bIndex = pf.defenseSystem.battleBases.buffer.Length - 1; bIndex >= 0; bIndex--)
+                {
+                    BattleBaseComponent bbc = pf.defenseSystem.battleBases.buffer[bIndex];
+                    if (bbc == null) continue;
+
+                    //添加战斗无人机，优先添加高级别无人机
+                    ModuleFleet fleet = bbc.combatModule.moduleFleets[0];
+                    for(int index=fleet.fighters.Length-1; index >= 0; index--)
+                    {
+                        ModuleFighter fighter = fleet.fighters[index];
+                        if (fighter.count == 0)
+                        {
+                            foreach (int itemId in fighters)
+                            {
+                                int[] result = TakeItem(itemId, 1);
+                                if (result[0] != 0)
+                                {
+                                    fleet.AddFighterToPort(index, itemId);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    //回收物品
+                    if (useStorege.Value) continue;
+                    StorageComponent sc = bbc.storage;
+                    if (sc.isEmpty) continue;
+                    for (int i = sc.grids.Length - 1; i >= 0; i--)
+                    {
+                        StorageComponent.GRID grid = sc.grids[i];
+                        if (grid.itemId <= 0 || grid.count <= 0) continue;
+                        int[] result = AddItem(grid.itemId, grid.count, grid.inc, false);
+                        if (result[0] != 0)
+                        {
+                            sc.grids[i].count -= result[0];
+                            sc.grids[i].inc -= result[1];
+                        }
+                    }
+                    sc.Sort();
+                }
+            }
+            taskState["ProcessBattleBase"] = true;
+        }
 
         //优先使用物流背包，其次星际物流塔
         int[] AddItem(int itemId, int count, int inc, bool assembler = true)
@@ -1017,9 +1142,9 @@ namespace PackageLogistic
         /// <returns>{实际放入物品数量， 实际放入物品增产量}</returns>
         int[] AddDeliveryPackageItem(int itemId, int count, int inc, bool assembler = true)
         {
-            if (itemId <= 0 || count <= 0 || !packageItemIndex.ContainsKey(itemId))
+            if (itemId <= 0 || count <= 0 || !packageItems.ContainsKey(itemId))
                 return new int[2] { 0, 0 };
-            int index = packageItemIndex[itemId];
+            int index = packageItems[itemId];
             if (index < 0 || deliveryPackage.grids[index].itemId != itemId)
                 return new int[2] { 0, 0 };
 
@@ -1058,10 +1183,10 @@ namespace PackageLogistic
         /// <returns>{实际放入物品数量， 实际放入物品增产量}</returns>
         int[] AddTransportItem(int itemId, int count, int inc, bool assembler = true)
         {
-            if (itemId <= 0 || count <= 0 || !transportItemIndex.ContainsKey(itemId))
+            if (itemId <= 0 || count <= 0 || !transportItems.ContainsKey(itemId))
                 return new int[2] { 0, 0 };
             int[] result = new int[2] { 0, 0 };
-            foreach (TransportStore store in transportItemIndex[itemId])
+            foreach (TransportItemIndex store in transportItems[itemId])
             {
                 PlanetFactory pf = GameMain.data.factories[store.planetIndex];
                 StationComponent sc = pf.transport.stationPool[store.transportIndex];
@@ -1121,9 +1246,9 @@ namespace PackageLogistic
         /// <returns>{实际取出物品数量， 实际取出物品增产量}</returns>
         int[] TakeDeliveryPackageItem(int itemId, int count)
         {
-            if (itemId <= 0 || count <= 0 || !packageItemIndex.ContainsKey(itemId))
+            if (itemId <= 0 || count <= 0 || !packageItems.ContainsKey(itemId))
                 return new int[2] { 0, 0 };
-            int index = packageItemIndex[itemId];
+            int index = packageItems[itemId];
             if (index < 0 || deliveryPackage.grids[index].itemId != itemId)
                 return new int[2] { 0, 0 };
             if (deliveryPackage.grids[index].count <= deliveryPackage.grids[index].requireCount)
@@ -1153,10 +1278,10 @@ namespace PackageLogistic
         /// <returns>{实际取出物品数量， 实际取出物品增产量}</returns>
         int[] TakeTransportItem(int itemId, int count)
         {
-            if (itemId <= 0 || count <= 0 || !transportItemIndex.ContainsKey(itemId))
+            if (itemId <= 0 || count <= 0 || !transportItems.ContainsKey(itemId))
                 return new int[2] { 0, 0 };
             int[] result = new int[2] { 0, 0 };
-            foreach (TransportStore store in transportItemIndex[itemId])
+            foreach (TransportItemIndex store in transportItems[itemId])
             {
                 PlanetFactory pf = GameMain.data.factories[store.planetIndex];
                 StationComponent sc = pf.transport.stationPool[store.transportIndex];
