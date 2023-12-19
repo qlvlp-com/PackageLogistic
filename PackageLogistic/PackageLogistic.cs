@@ -31,7 +31,7 @@ namespace PackageLogistic
     {
         public const string GUID = "com.qlvlp.dsp.PackageLogistic";
         public const string NAME = "PackageLogistic";
-        public const string VERSION = "1.0.7";
+        public const string VERSION = "1.0.8";
 
         private ConfigEntry<Boolean> autoSpray;
         private ConfigEntry<Boolean> costProliferator;
@@ -42,11 +42,11 @@ namespace PackageLogistic
         private ConfigEntry<Boolean> useStorege;
         private ConfigEntry<KeyboardShortcut> hotKey;
         private ConfigEntry<Boolean> enableMod;
+        private ConfigEntry<Boolean> autoReplenishPackage;
 
         private DeliveryPackage deliveryPackage;
-        private Dictionary<int, int> packageItems = new Dictionary<int, int>(); //<itemId,deliveryPackage.grids Index>
-        private Dictionary<int, List<TransportItemIndex>> transportItems = new Dictionary<int, List<TransportItemIndex>>(); //<itemId, TransportItemIndex>
-
+        private Dictionary<int, int> deliveryPackageItems = new Dictionary<int, int>(); //<itemId,deliveryPackage.grids Index>
+        private Dictionary<int, List<TransportItemIndex>> galacticTransportItems = new Dictionary<int, List<TransportItemIndex>>(); //<itemId, TransportItemIndex>
         private readonly List<(int, int)> proliferators = new List<(int, int)>();
         private readonly Dictionary<int, int> incPool = new Dictionary<int, int>()
         {
@@ -61,7 +61,7 @@ namespace PackageLogistic
         private const float hydrogenThreshold = 0.6f;
 
         private bool showGUI = false;
-        private Rect windowRect = new Rect(700, 250, 500, 300);
+        private Rect windowRect = new Rect(700, 250, 500, 370);
         private readonly Texture2D windowTexture = new Texture2D(10, 10);
         private int selectedPanel = 0;
 
@@ -77,6 +77,7 @@ namespace PackageLogistic
         {
             hotKey = Config.Bind("窗口快捷键", "Key", new KeyboardShortcut(KeyCode.L, KeyCode.LeftControl));
             enableMod = Config.Bind<Boolean>("配置", "EnableMod", true, "启用MOD");
+            autoReplenishPackage = Config.Bind<Boolean>("配置", "autoReplenishPackage", true, "自动补充伊卡洛斯物品清单中开启过滤的物品");
             autoSpray = Config.Bind<Boolean>("配置", "AutoSpray", true, "自动喷涂。自动使用物流背包里的增产剂对物流背包内的其它物品进行喷涂");
             costProliferator = Config.Bind<Boolean>("配置", "CostProliferator", true, "消耗增产剂。自动喷涂时消耗背包里的增产剂");
             infItems = Config.Bind<Boolean>("配置", "InfItems", false, "无限物品。物流背包内所有物品无限数量（无法获取成就）");
@@ -86,7 +87,8 @@ namespace PackageLogistic
             useStorege = Config.Bind<Boolean>("配置", "useStorege", true, "从储物箱和储液罐回收物品");
             fuelId = Config.Bind<int>("配置", "fuelId", 0, "火力发电站燃料ID\n" +
                 "0:自动选择，精炼油和氢储量超60%时，谁多使用谁，否则使用煤，可防止原油裂解反应阻塞\n" +
-                "1006:煤, 1109:石墨, 1007:原油, 1114:精炼油, 1120:氢气, 1801:氢燃料棒, 1011:可燃冰");
+                "1006:煤, 1109:石墨, 1007:原油, 1114:精炼油, 1120:氢气, 1801:氢燃料棒, 1011:可燃冰\n" +
+                "5206:能量碎片, 1128:燃烧单元, 1030:木材, 1031:植物燃料");
             fuelOptions.Add(0, "自动");
             fuelOptions.Add(1006, "煤");
             fuelOptions.Add(1109, "石墨");
@@ -95,6 +97,10 @@ namespace PackageLogistic
             fuelOptions.Add(1120, "氢气");
             fuelOptions.Add(1801, "氢燃料棒");
             fuelOptions.Add(1011, "可燃冰");
+            fuelOptions.Add(5206, "能量碎片");
+            fuelOptions.Add(1128, "燃烧单元");
+            fuelOptions.Add(1030, "木材");
+            fuelOptions.Add(1031, "植物燃料");
             selectedFuelIndex = fuelOptions.Keys.ToList().FindIndex(id => id == fuelId.Value);
 
             proliferators.Add((1143, 4));  //增产剂MK.III
@@ -143,10 +149,6 @@ namespace PackageLogistic
                                 taskState["ProcessStorage"] = false;
                                 ThreadPool.QueueUserWorkItem(ProcessStorage, taskState);
                             }
-                            else
-                            {
-                                taskState["ProcessStorage"] = true;
-                            }
                             taskState["ProcessAssembler"] = false;
                             ThreadPool.QueueUserWorkItem(ProcessAssembler, taskState);
                             taskState["ProcessMiner"] = false;
@@ -165,6 +167,11 @@ namespace PackageLogistic
                             ThreadPool.QueueUserWorkItem(ProcessTurret, taskState);
                             taskState["ProcessBattleBase"] = false;
                             ThreadPool.QueueUserWorkItem(ProcessBattleBase, taskState);
+                            if (autoReplenishPackage.Value)
+                            {
+                                taskState["ProcessPackage"] = false;
+                                ThreadPool.QueueUserWorkItem(ProcessPackage, taskState);
+                            }
 
                             var keys = new List<string>(taskState.Keys);
                             while (true)
@@ -222,6 +229,7 @@ namespace PackageLogistic
             }
         }
 
+        //设置界面UI
         void WindowFunction(int windowID)
         {
             string[] panels = { "主选项", "物品", "战斗" };
@@ -245,6 +253,10 @@ namespace PackageLogistic
             GUILayout.Space(10);
             GUILayout.Label("启用或停止MOD运行");
             enableMod.Value = GUILayout.Toggle(enableMod.Value, "启用MOD");
+
+            GUILayout.Space(10);
+            GUILayout.Label("自动补充伊卡洛斯物品清单中开启过滤的物品");
+            autoReplenishPackage.Value = GUILayout.Toggle(autoReplenishPackage.Value, "自动补充");
 
             GUILayout.Space(15);
             GUILayout.Label("自动使用物流背包里的增产剂对物流背包内的其它物品进行喷涂");
@@ -304,7 +316,6 @@ namespace PackageLogistic
             GUILayout.Space(5);
             GUILayout.EndVertical();
         }
-
 
         void CheckTech()
         {
@@ -385,17 +396,17 @@ namespace PackageLogistic
         void CreateDeliveryPackageItemIndex()
         {
             Logger.LogDebug("CreateDeliveryPackageItemIndex");
-            packageItems = new Dictionary<int, int>();
+            deliveryPackageItems = new Dictionary<int, int>();
             for (int index = 0; index < deliveryPackage.gridLength; index++)
             {
                 DeliveryPackage.GRID grid = deliveryPackage.grids[index];
                 int max_count = Math.Min(grid.recycleCount, grid.stackSizeModified);
                 if (grid.itemId > 0)
                 {
-                    if (!packageItems.ContainsKey(grid.itemId))
-                        packageItems.Add(grid.itemId, index);
+                    if (!deliveryPackageItems.ContainsKey(grid.itemId))
+                        deliveryPackageItems.Add(grid.itemId, index);
                     else
-                        packageItems[grid.itemId] = index;
+                        deliveryPackageItems[grid.itemId] = index;
 
 
                     ItemProto item = LDB.items.Select(grid.itemId);
@@ -442,7 +453,7 @@ namespace PackageLogistic
         void CreateTransportItemIndex()
         {
             Logger.LogDebug("CreateTransportItemIndex");
-            transportItems = new Dictionary<int, List<TransportItemIndex>>();
+            galacticTransportItems = new Dictionary<int, List<TransportItemIndex>>();
             for (int planetIndex = GameMain.data.factories.Length - 1; planetIndex >= 0; planetIndex--)
             {
                 PlanetFactory pf = GameMain.data.factories[planetIndex];
@@ -457,12 +468,12 @@ namespace PackageLogistic
                         {
                             StationStore ss = sc.storage[storageIndex];
                             if (ss.itemId <= 0) continue;
-                            if (!transportItems.ContainsKey(ss.itemId))
+                            if (!galacticTransportItems.ContainsKey(ss.itemId))
                             {
-                                transportItems[ss.itemId] = new List<TransportItemIndex>();
+                                galacticTransportItems[ss.itemId] = new List<TransportItemIndex>();
                             }
                             TransportItemIndex store = new TransportItemIndex(planetIndex, transportIndex, storageIndex);
-                            transportItems[ss.itemId].Add(new TransportItemIndex(planetIndex, transportIndex, storageIndex));
+                            galacticTransportItems[ss.itemId].Add(new TransportItemIndex(planetIndex, transportIndex, storageIndex));
 
                             ItemProto item = LDB.items.Select(ss.itemId);  //建筑物储量最大值设置为物品默认堆叠值
                             if (item.CanBuild)
@@ -511,15 +522,15 @@ namespace PackageLogistic
 
         bool HasItem(int itemId)
         {
-            if (packageItems.ContainsKey(itemId))
+            if (deliveryPackageItems.ContainsKey(itemId))
             {
-                int index = packageItems[itemId];
+                int index = deliveryPackageItems[itemId];
                 if (deliveryPackage.grids[index].count > 0)
                     return true;
             }
-            else if (transportItems.ContainsKey(itemId))
+            else if (galacticTransportItems.ContainsKey(itemId))
             {
-                foreach (TransportItemIndex store in transportItems[itemId])
+                foreach (TransportItemIndex store in galacticTransportItems[itemId])
                 {
                     PlanetFactory pf = GameMain.data.factories[store.planetIndex];
                     StationComponent sc = pf.transport.stationPool[store.transportIndex];
@@ -834,10 +845,11 @@ namespace PackageLogistic
             taskState["ProcessMiner"] = true;
         }
 
+        //火力发电厂燃料选择
         int ThermalPowerPlantFuel()
         {
             Logger.LogDebug("thermalPowerPlantFuel");
-            if (fuelId.Value != 0)  //手动选择燃料
+            if (fuelId.Value != 0 && HasItem(fuelId.Value))  //手动选择燃料
             {
                 return fuelId.Value;
             }
@@ -846,15 +858,15 @@ namespace PackageLogistic
             float p_1120 = 0.0f;
             float max1114 = 1, max1120 = 1;
             float count1114 = 0, count1120 = 0;
-            if (packageItems.ContainsKey(1114))
+            if (deliveryPackageItems.ContainsKey(1114))
             {
-                var grid = deliveryPackage.grids[packageItems[1114]];
+                var grid = deliveryPackage.grids[deliveryPackageItems[1114]];
                 max1114 += grid.stackSizeModified;
                 count1114 += grid.count;
             }
-            if (transportItems.ContainsKey(1114))
+            if (galacticTransportItems.ContainsKey(1114))
             {
-                foreach (TransportItemIndex store in transportItems[1114])
+                foreach (TransportItemIndex store in galacticTransportItems[1114])
                 {
                     PlanetFactory pf = GameMain.data.factories[store.planetIndex];
                     StationComponent sc = pf.transport.stationPool[store.transportIndex];
@@ -866,15 +878,15 @@ namespace PackageLogistic
                 }
             }
 
-            if (packageItems.ContainsKey(1120))
+            if (deliveryPackageItems.ContainsKey(1120))
             {
-                var grid = deliveryPackage.grids[packageItems[1120]];
+                var grid = deliveryPackage.grids[deliveryPackageItems[1120]];
                 max1120 += grid.stackSizeModified;
                 count1120 += grid.count;
             }
-            if (transportItems.ContainsKey(1120))
+            if (galacticTransportItems.ContainsKey(1120))
             {
-                foreach (TransportItemIndex store in transportItems[1120])
+                foreach (TransportItemIndex store in galacticTransportItems[1120])
                 {
                     PlanetFactory pf = GameMain.data.factories[store.planetIndex];
                     StationComponent sc = pf.transport.stationPool[store.transportIndex];
@@ -1174,7 +1186,46 @@ namespace PackageLogistic
             taskState["ProcessBattleBase"] = true;
         }
 
-        //优先使用物流背包，其次星际物流塔
+
+        /// <summary>
+        /// 对物品清单内开启了过滤的物品进行自动补充
+        /// </summary>
+        /// <param name="state"></param>
+        void ProcessPackage(object state)
+        {
+            Logger.LogDebug("ProcessPackage");
+            bool changed = false;
+            StorageComponent package = GameMain.mainPlayer.package;
+            for(int index=package.grids.Length - 1; index >= 0; index--)
+            {
+                StorageComponent.GRID grid = package.grids[index];
+                if (grid.filter != 0 && grid.count < grid.stackSize)
+                {
+                    int[] result = TakeItem(grid.itemId, grid.stackSize - grid.count);
+                    if (result[0] != 0)
+                    {
+                        package.grids[index].count += result[0];
+                        package.grids[index].inc += result[1];
+                        changed = true;
+                    }
+                }
+            }
+            if (changed)
+            {
+                package.Sort();
+            }
+            taskState["ProcessPackage"] = true;
+        }
+
+
+        /// <summary>
+        /// 向物流背包和星际运输站存放物品。优先使用物流背包，其次星际物流塔
+        /// </summary>
+        /// <param name="itemId"></param>
+        /// <param name="count"></param>
+        /// <param name="inc"></param>
+        /// <param name="assembler"></param>
+        /// <returns></returns>
         int[] AddItem(int itemId, int count, int inc, bool assembler = true)
         {
             int[] result = AddDeliveryPackageItem(itemId, count, inc, assembler);
@@ -1199,9 +1250,9 @@ namespace PackageLogistic
         /// <returns>{实际放入物品数量， 实际放入物品增产量}</returns>
         int[] AddDeliveryPackageItem(int itemId, int count, int inc, bool assembler = true)
         {
-            if (itemId <= 0 || count <= 0 || !packageItems.ContainsKey(itemId))
+            if (itemId <= 0 || count <= 0 || !deliveryPackageItems.ContainsKey(itemId))
                 return new int[2] { 0, 0 };
-            int index = packageItems[itemId];
+            int index = deliveryPackageItems[itemId];
             if (index < 0 || deliveryPackage.grids[index].itemId != itemId)
                 return new int[2] { 0, 0 };
 
@@ -1240,10 +1291,10 @@ namespace PackageLogistic
         /// <returns>{实际放入物品数量， 实际放入物品增产量}</returns>
         int[] AddTransportItem(int itemId, int count, int inc, bool assembler = true)
         {
-            if (itemId <= 0 || count <= 0 || !transportItems.ContainsKey(itemId))
+            if (itemId <= 0 || count <= 0 || !galacticTransportItems.ContainsKey(itemId))
                 return new int[2] { 0, 0 };
             int[] result = new int[2] { 0, 0 };
-            foreach (TransportItemIndex store in transportItems[itemId])
+            foreach (TransportItemIndex store in galacticTransportItems[itemId])
             {
                 PlanetFactory pf = GameMain.data.factories[store.planetIndex];
                 StationComponent sc = pf.transport.stationPool[store.transportIndex];
@@ -1281,7 +1332,12 @@ namespace PackageLogistic
             return result;
         }
 
-        //优先使用物流背包，其次星际物流塔
+        /// <summary>
+        /// 从物流背包和星际运输站拿取物品。优先使用物流背包，其次星际物流塔
+        /// </summary>
+        /// <param name="itemId"></param>
+        /// <param name="count"></param>
+        /// <returns></returns>
         int[] TakeItem(int itemId, int count)
         {
             int[] result = TakeDeliveryPackageItem(itemId, count);
@@ -1303,9 +1359,9 @@ namespace PackageLogistic
         /// <returns>{实际取出物品数量， 实际取出物品增产量}</returns>
         int[] TakeDeliveryPackageItem(int itemId, int count)
         {
-            if (itemId <= 0 || count <= 0 || !packageItems.ContainsKey(itemId))
+            if (itemId <= 0 || count <= 0 || !deliveryPackageItems.ContainsKey(itemId))
                 return new int[2] { 0, 0 };
-            int index = packageItems[itemId];
+            int index = deliveryPackageItems[itemId];
             if (index < 0 || deliveryPackage.grids[index].itemId != itemId)
                 return new int[2] { 0, 0 };
             if (deliveryPackage.grids[index].count <= deliveryPackage.grids[index].requireCount)
@@ -1335,10 +1391,10 @@ namespace PackageLogistic
         /// <returns>{实际取出物品数量， 实际取出物品增产量}</returns>
         int[] TakeTransportItem(int itemId, int count)
         {
-            if (itemId <= 0 || count <= 0 || !transportItems.ContainsKey(itemId))
+            if (itemId <= 0 || count <= 0 || !galacticTransportItems.ContainsKey(itemId))
                 return new int[2] { 0, 0 };
             int[] result = new int[2] { 0, 0 };
-            foreach (TransportItemIndex store in transportItems[itemId])
+            foreach (TransportItemIndex store in galacticTransportItems[itemId])
             {
                 PlanetFactory pf = GameMain.data.factories[store.planetIndex];
                 StationComponent sc = pf.transport.stationPool[store.transportIndex];

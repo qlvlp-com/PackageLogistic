@@ -5,11 +5,11 @@
 ctrl+L
 
 ## 获取方式
-### github
+### 【github】
 https://github.com/qlvlp-com/PackageLogistic
-### 百度网盘
+### 【百度网盘】
 https://pan.baidu.com/s/1GoVky8FkgsrVaxNZJ3E2Mg?pwd=g3sp
-### thunderstore
+### 【thunderstore】
 https://dsp.thunderstore.io/package/qlvlp/PackageLogistic/
 
 ## 使用介绍
@@ -17,6 +17,10 @@ https://dsp.thunderstore.io/package/qlvlp/PackageLogistic/
  https://www.bilibili.com/video/BV1Ye411k7Ws/?share_source=copy_web&vd_source=e98c885722228bac750b1f4747eee0c2
 
 ## 版本
+### version 1.0.8
+1. 新增物流背包和星际运输站物品可以向伊卡洛斯物品清单格子补充物品功能，仅对开启了过滤的物品进行自动补充（鼠标中键点击格子进行选择过滤物品）。
+2. 新增加火力发电站燃料选项：能量碎片，燃烧单元，木材，植物燃料。优化燃料选择逻辑：当手动指定的燃料耗尽时，将按自动模式进行燃料选取。
+
 ### version 1.0.7
 1. 新增无限弹药功能
 2. 新增无限舰队功能
