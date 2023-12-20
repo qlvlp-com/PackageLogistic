@@ -174,21 +174,26 @@ namespace PackageLogistic
                             }
 
                             var keys = new List<string>(taskState.Keys);
+                            string key = "";
                             while (true)
                             {
                                 bool finish = true;
                                 DateTime now = DateTime.Now;
                                 for (int i = 0; i < keys.Count; i++)
                                 {
-                                    finish &= taskState[keys[i]];
+                                    if (taskState[keys[i]] == false)
+                                    {
+                                        key = keys[i];
+                                        finish = false;
+                                        break;
+                                    }
+                                }
+                                if ((now - startTime).TotalMilliseconds >= 1000)
+                                {
+                                    Logger.LogError(string.Format("{0} cost time >= 1000 ms", key));
                                 }
                                 if (finish)
                                     break;
-                                else if ((now - startTime).TotalMilliseconds >= 1000)
-                                {
-                                    Logger.LogError("task state set exception!");
-                                    break;
-                                }
                                 else
                                     Thread.Sleep(5);
                             }
@@ -728,6 +733,7 @@ namespace PackageLogistic
 
                 PlanetFactory pf = GameMain.data.factories[index];
                 if (pf == null) continue;
+
                 foreach (StorageComponent sc in pf.factoryStorage.storagePool)
                 {
                     if (sc == null || sc.isEmpty) continue;
@@ -740,10 +746,15 @@ namespace PackageLogistic
                         {
                             sc.grids[i].count -= result[0];
                             sc.grids[i].inc -= result[1];
+                            if (sc.grids[i].count <= 0)
+                            {
+                                sc.grids[i].itemId = sc.grids[i].filter;
+                            }
                         }
                     }
-                    sc.Sort();
+                    sc.NotifyStorageChange();
                 }
+
 
                 for (int i = pf.factoryStorage.tankPool.Length - 1; i >= 0; --i)
                 {
@@ -1178,11 +1189,17 @@ namespace PackageLogistic
                         {
                             sc.grids[i].count -= result[0];
                             sc.grids[i].inc -= result[1];
+                            if (sc.grids[i].count <= 0)
+                            {
+                                sc.grids[i].itemId = sc.grids[i].filter;
+                            }
                         }
                     }
-                    sc.Sort();
+                    sc.NotifyStorageChange();
+
                 }
             }
+
             taskState["ProcessBattleBase"] = true;
         }
 
@@ -1196,7 +1213,7 @@ namespace PackageLogistic
             Logger.LogDebug("ProcessPackage");
             bool changed = false;
             StorageComponent package = GameMain.mainPlayer.package;
-            for(int index=package.grids.Length - 1; index >= 0; index--)
+            for (int index = package.grids.Length - 1; index >= 0; index--)
             {
                 StorageComponent.GRID grid = package.grids[index];
                 if (grid.filter != 0 && grid.count < grid.stackSize)
@@ -1212,8 +1229,9 @@ namespace PackageLogistic
             }
             if (changed)
             {
-                package.Sort();
+                package.NotifyStorageChange();
             }
+
             taskState["ProcessPackage"] = true;
         }
 

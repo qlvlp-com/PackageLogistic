@@ -17,6 +17,9 @@ https://dsp.thunderstore.io/package/qlvlp/PackageLogistic/
  https://www.bilibili.com/video/BV1Ye411k7Ws/?share_source=copy_web&vd_source=e98c885722228bac750b1f4747eee0c2
 
 ## 版本
+### version 1.0.9
+1. 修复BUG：启用物流背包和星际运输站物品可以向伊卡洛斯物品清单格子补充物品功能时，低概率造成物品清单格子中物品丢失。
+
 ### version 1.0.8
 1. 新增物流背包和星际运输站物品可以向伊卡洛斯物品清单格子补充物品功能，仅对开启了过滤的物品进行自动补充（鼠标中键点击格子进行选择过滤物品）。
 2. 新增加火力发电站燃料选项：能量碎片，燃烧单元，木材，植物燃料。优化燃料选择逻辑：当手动指定的燃料耗尽时，将按自动模式进行燃料选取。
