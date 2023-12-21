@@ -55,7 +55,7 @@ namespace PackageLogistic
             {1143, 0 }
         };
 
-        private readonly Dictionary<string, bool> taskState = new Dictionary<string, bool>();
+        private Dictionary<string, bool> taskState = new Dictionary<string, bool>();
 
         private int stackSize = 0;
         private const float hydrogenThreshold = 0.6f;
@@ -130,7 +130,7 @@ namespace PackageLogistic
                             Logger.LogInfo("Game is not running!");
                             continue;
                         }
-
+                        
                         if (enableMod.Value)
                         {
                             if (infSand.Value && GameMain.mainPlayer.sandCount != 1000000000)
@@ -142,6 +142,7 @@ namespace PackageLogistic
                             CreateDeliveryPackageItemIndex();
                             CreateTransportItemIndex();
                             CheckTech();
+
                             taskState["ProcessTransport"] = false;
                             ThreadPool.QueueUserWorkItem(ProcessTransport, taskState);
                             if (useStorege.Value)
@@ -191,6 +192,7 @@ namespace PackageLogistic
                                 if ((now - startTime).TotalMilliseconds >= 1000)
                                 {
                                     Logger.LogError(string.Format("{0} cost time >= 1000 ms", key));
+                                    break;
                                 }
                                 if (finish)
                                     break;
@@ -485,7 +487,7 @@ namespace PackageLogistic
                             {
                                 sc.storage[storageIndex].max = Math.Min(item.StackSize * 10, ss.max);
                             }
-
+                            
                             if (infItems.Value)  // 无限物品模式
                             {
                                 sc.storage[storageIndex].count = ss.max;
@@ -687,40 +689,50 @@ namespace PackageLogistic
         void ProcessTransport(object state)
         {
             Logger.LogDebug("ProcessTransport");
-            for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
+            try
             {
-                PlanetFactory pf = GameMain.data.factories[index];
-                if (pf == null) continue;
-                foreach (StationComponent sc in pf.transport.stationPool)
+                for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
                 {
-                    if (sc == null || sc.id <= 0) { continue; }
-                    if (sc.isStellar == false && sc.isCollector == false && sc.isVeinCollector == false) //行星运输站
+                    PlanetFactory pf = GameMain.data.factories[index];
+                    if (pf == null) continue;
+                    foreach (StationComponent sc in pf.transport.stationPool)
                     {
-                        for (int i = sc.storage.Length - 1; i >= 0; i--)
+                        if (sc == null || sc.id <= 0) { continue; }
+                        if (sc.isStellar == false && sc.isCollector == false && sc.isVeinCollector == false) //行星运输站
                         {
-                            StationStore ss = sc.storage[i];
-                            if (ss.itemId <= 0) continue;
-                            if (ss.localLogic == ELogisticStorage.Supply && ss.count > 0)
+                            for (int i = sc.storage.Length - 1; i >= 0; i--)
                             {
-                                int[] result;
-                                result = AddItem(ss.itemId, ss.count, ss.inc, false);
-                                sc.storage[i].count -= result[0];
-                                sc.storage[i].inc -= result[1];
-                            }
-                            else if (ss.localLogic == ELogisticStorage.Demand)
-                            {
-                                int expectCount = ss.max - ss.localOrder - ss.remoteOrder - ss.count;
-                                if (expectCount <= 0) continue;
-                                int[] result = TakeItem(ss.itemId, expectCount);
-                                sc.storage[i].count += result[0];
-                                sc.storage[i].inc += result[1];
+                                StationStore ss = sc.storage[i];
+                                if (ss.itemId <= 0) continue;
+                                if (ss.localLogic == ELogisticStorage.Supply && ss.count > 0)
+                                {
+                                    int[] result;
+                                    result = AddItem(ss.itemId, ss.count, ss.inc, false);
+                                    sc.storage[i].count -= result[0];
+                                    sc.storage[i].inc -= result[1];
+                                }
+                                else if (ss.localLogic == ELogisticStorage.Demand)
+                                {
+                                    int expectCount = ss.max - ss.localOrder - ss.remoteOrder - ss.count;
+                                    if (expectCount <= 0) continue;
+                                    int[] result = TakeItem(ss.itemId, expectCount);
+                                    sc.storage[i].count += result[0];
+                                    sc.storage[i].inc += result[1];
+                                }
                             }
                         }
-                    }
 
+                    }
                 }
+            }catch (Exception ex)
+            {
+                Logger.LogError(ex);
             }
-            taskState["ProcessTransport"] = true;
+            finally
+            {
+                taskState["ProcessTransport"] = true;
+            }
+            
         }
 
 
@@ -728,50 +740,60 @@ namespace PackageLogistic
         void ProcessStorage(object state)
         {
             Logger.LogDebug("ProcessStorage");
-            for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
+            try
             {
-
-                PlanetFactory pf = GameMain.data.factories[index];
-                if (pf == null) continue;
-
-                foreach (StorageComponent sc in pf.factoryStorage.storagePool)
+                for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
                 {
-                    if (sc == null || sc.isEmpty) continue;
-                    for (int i = sc.grids.Length - 1; i >= 0; i--)
+
+                    PlanetFactory pf = GameMain.data.factories[index];
+                    if (pf == null) continue;
+
+                    foreach (StorageComponent sc in pf.factoryStorage.storagePool)
                     {
-                        StorageComponent.GRID grid = sc.grids[i];
-                        if (grid.itemId <= 0 || grid.count <= 0) continue;
-                        int[] result = AddItem(grid.itemId, grid.count, grid.inc, false);
-                        if (result[0] != 0)
+                        if (sc == null || sc.isEmpty) continue;
+                        for (int i = sc.grids.Length - 1; i >= 0; i--)
                         {
-                            sc.grids[i].count -= result[0];
-                            sc.grids[i].inc -= result[1];
-                            if (sc.grids[i].count <= 0)
+                            StorageComponent.GRID grid = sc.grids[i];
+                            if (grid.itemId <= 0 || grid.count <= 0) continue;
+                            int[] result = AddItem(grid.itemId, grid.count, grid.inc, false);
+                            if (result[0] != 0)
                             {
-                                sc.grids[i].itemId = sc.grids[i].filter;
+                                sc.grids[i].count -= result[0];
+                                sc.grids[i].inc -= result[1];
+                                if (sc.grids[i].count <= 0)
+                                {
+                                    sc.grids[i].itemId = sc.grids[i].filter;
+                                }
                             }
                         }
+                        sc.NotifyStorageChange();
                     }
-                    sc.NotifyStorageChange();
-                }
 
 
-                for (int i = pf.factoryStorage.tankPool.Length - 1; i >= 0; --i)
-                {
-                    TankComponent tc = pf.factoryStorage.tankPool[i];
-                    if (tc.id == 0 || tc.fluidId == 0 || tc.fluidCount == 0) continue;
-                    int[] result = AddItem(tc.fluidId, tc.fluidCount, tc.fluidInc, false);
-                    pf.factoryStorage.tankPool[i].fluidCount -= result[0];
-                    pf.factoryStorage.tankPool[i].fluidInc -= result[1];
-                    if (pf.factoryStorage.tankPool[i].fluidCount <= 0)
+                    for (int i = pf.factoryStorage.tankPool.Length - 1; i >= 0; --i)
                     {
-                        pf.factoryStorage.tankPool[i].fluidId = 0;
-                        pf.factoryStorage.tankPool[i].fluidInc = 0;
+                        TankComponent tc = pf.factoryStorage.tankPool[i];
+                        if (tc.id == 0 || tc.fluidId == 0 || tc.fluidCount == 0) continue;
+                        int[] result = AddItem(tc.fluidId, tc.fluidCount, tc.fluidInc, false);
+                        pf.factoryStorage.tankPool[i].fluidCount -= result[0];
+                        pf.factoryStorage.tankPool[i].fluidInc -= result[1];
+                        if (pf.factoryStorage.tankPool[i].fluidCount <= 0)
+                        {
+                            pf.factoryStorage.tankPool[i].fluidId = 0;
+                            pf.factoryStorage.tankPool[i].fluidInc = 0;
+                        }
                     }
-                }
 
+                }
+            }catch (Exception ex)
+            {
+                Logger.LogError(ex);
             }
-            taskState["ProcessStorage"] = true;
+            finally
+            {
+                taskState["ProcessStorage"] = true;
+            }
+            
         }
 
 
@@ -779,31 +801,41 @@ namespace PackageLogistic
         void ProcessAssembler(object state)
         {
             Logger.LogDebug("ProcessAssembler");
-            for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
+            try
             {
-                PlanetFactory pf = GameMain.data.factories[index];
-                if (pf == null) continue;
-                foreach (AssemblerComponent ac in pf.factorySystem.assemblerPool)
+                for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
                 {
-                    if (ac.id <= 0 || ac.recipeId <= 0) continue;
-                    for (int i = ac.products.Length - 1; i >= 0; i--)
+                    PlanetFactory pf = GameMain.data.factories[index];
+                    if (pf == null) continue;
+                    foreach (AssemblerComponent ac in pf.factorySystem.assemblerPool)
                     {
-                        if (ac.produced[i] > 0)
-                            ac.produced[i] -= AddItem(ac.products[i], ac.produced[i], 0)[0];
-                    }
-                    for (int i = ac.requires.Length - 1; i >= 0; i--)
-                    {
-                        int expectCount = Math.Max(ac.requireCounts[i] * 5 - ac.served[i], 0);
-                        if (expectCount > 0)
+                        if (ac.id <= 0 || ac.recipeId <= 0) continue;
+                        for (int i = ac.products.Length - 1; i >= 0; i--)
                         {
-                            int[] result = TakeItem(ac.requires[i], expectCount);
-                            ac.served[i] += result[0];
-                            ac.incServed[i] += result[1];
+                            if (ac.produced[i] > 0)
+                                ac.produced[i] -= AddItem(ac.products[i], ac.produced[i], 0)[0];
+                        }
+                        for (int i = ac.requires.Length - 1; i >= 0; i--)
+                        {
+                            int expectCount = Math.Max(ac.requireCounts[i] * 5 - ac.served[i], 0);
+                            if (expectCount > 0)
+                            {
+                                int[] result = TakeItem(ac.requires[i], expectCount);
+                                ac.served[i] += result[0];
+                                ac.incServed[i] += result[1];
+                            }
                         }
                     }
                 }
+            }catch(Exception ex)
+            {
+                Logger.LogError(ex);
             }
-            taskState["ProcessAssembler"] = true;
+            finally
+            {
+                taskState["ProcessAssembler"] = true;
+            }
+            
         }
 
 
@@ -811,48 +843,54 @@ namespace PackageLogistic
         void ProcessMiner(object state)
         {
             Logger.LogDebug("ProcessMiner");
-            for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
+            try
             {
-                PlanetFactory pf = GameMain.data.factories[index];
-                if (pf == null) continue;
-
-                for (int i = pf.factorySystem.minerPool.Length - 1; i >= 0; i--)
+                for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
                 {
-                    MinerComponent mc = pf.factorySystem.minerPool[i];
-                    if (mc.id <= 0 || mc.productId <= 0 || mc.productCount <= 0) continue;
-                    int[] result = AddItem(mc.productId, mc.productCount, 0, false);
-                    pf.factorySystem.minerPool[i].productCount -= result[0];
-                }
+                    PlanetFactory pf = GameMain.data.factories[index];
+                    if (pf == null) continue;
 
-                //大型矿机，轨道采集器
-                foreach (StationComponent sc in pf.transport.stationPool)
-                {
-                    if (sc == null || sc.id <= 0) { continue; }
-                    if (sc.isStellar && sc.isCollector)  //轨道采集器
+                    for (int i = pf.factorySystem.minerPool.Length - 1; i >= 0; i--)
                     {
-                        for (int i = sc.storage.Length - 1; i >= 0; i--)
+                        MinerComponent mc = pf.factorySystem.minerPool[i];
+                        if (mc.id <= 0 || mc.productId <= 0 || mc.productCount <= 0) continue;
+                        int[] result = AddItem(mc.productId, mc.productCount, 0, false);
+                        pf.factorySystem.minerPool[i].productCount -= result[0];
+                    }
+
+                    //大型矿机，轨道采集器
+                    foreach (StationComponent sc in pf.transport.stationPool)
+                    {
+                        if (sc == null || sc.id <= 0) { continue; }
+                        if (sc.isStellar && sc.isCollector)  //轨道采集器
                         {
-                            StationStore ss = sc.storage[i];
-                            if (ss.itemId <= 0 || ss.count <= 0 || ss.remoteLogic != ELogisticStorage.Supply)
+                            for (int i = sc.storage.Length - 1; i >= 0; i--)
+                            {
+                                StationStore ss = sc.storage[i];
+                                if (ss.itemId <= 0 || ss.count <= 0 || ss.remoteLogic != ELogisticStorage.Supply)
+                                    continue;
+
+                                int[] result;
+                                result = AddItem(ss.itemId, ss.count, 0, false);
+                                sc.storage[i].count -= result[0];
+                            }
+                        }
+                        else if (sc.isVeinCollector)  // 大型采矿机
+                        {
+                            StationStore ss = sc.storage[0];
+                            if (ss.itemId <= 0 || ss.count <= 0 || ss.localLogic != ELogisticStorage.Supply)
                                 continue;
 
-                            int[] result;
-                            result = AddItem(ss.itemId, ss.count, 0, false);
-                            sc.storage[i].count -= result[0];
+                            int[] result = AddItem(ss.itemId, ss.count, 0, false);
+                            sc.storage[0].count -= result[0];
                         }
                     }
-                    else if (sc.isVeinCollector)  // 大型采矿机
-                    {
-                        StationStore ss = sc.storage[0];
-                        if (ss.itemId <= 0 || ss.count <= 0 || ss.localLogic != ELogisticStorage.Supply)
-                            continue;
-
-                        int[] result = AddItem(ss.itemId, ss.count, 0, false);
-                        sc.storage[0].count -= result[0];
-                    }
                 }
-            }
 
+            }catch (Exception ex)
+            {
+                Logger.LogError(ex);
+            }
             taskState["ProcessMiner"] = true;
         }
 
@@ -928,276 +966,340 @@ namespace PackageLogistic
         void ProcessPowerGenerator(object state)
         {
             Logger.LogDebug("ProcessPowerGenerator");
-            for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
+            try
             {
-                PlanetFactory pf = GameMain.data.factories[index];
-                if (pf == null) continue;
-                for (int i = pf.powerSystem.genPool.Length - 1; i >= 0; i--)
+                for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
                 {
-                    PowerGeneratorComponent pgc = pf.powerSystem.genPool[i];
-                    if (pgc.id <= 0) continue;
-                    if (pgc.gamma == true) // 射线接受器
+                    PlanetFactory pf = GameMain.data.factories[index];
+                    if (pf == null) continue;
+                    for (int i = pf.powerSystem.genPool.Length - 1; i >= 0; i--)
                     {
-                        if (pgc.catalystPoint + pgc.catalystIncPoint < 3600)
+                        PowerGeneratorComponent pgc = pf.powerSystem.genPool[i];
+                        if (pgc.id <= 0) continue;
+                        if (pgc.gamma == true) // 射线接受器
                         {
-                            int[] result = TakeItem(1209, 3);
-                            if (result[0] > 0)
+                            if (pgc.catalystPoint + pgc.catalystIncPoint < 3600)
                             {
-                                pf.powerSystem.genPool[i].catalystId = 1209;
-                                pf.powerSystem.genPool[i].catalystPoint += result[0] * 3600;
-                                pf.powerSystem.genPool[i].catalystIncPoint += result[1] * 3600;
+                                int[] result = TakeItem(1209, 3);
+                                if (result[0] > 0)
+                                {
+                                    pf.powerSystem.genPool[i].catalystId = 1209;
+                                    pf.powerSystem.genPool[i].catalystPoint += result[0] * 3600;
+                                    pf.powerSystem.genPool[i].catalystIncPoint += result[1] * 3600;
+                                }
                             }
+                            if (pgc.productId > 0 && pgc.productCount >= 1)
+                            {
+                                int[] result = AddItem(pgc.productId, (int)pgc.productCount, 0);
+                                pf.powerSystem.genPool[i].productCount -= result[0];
+                            }
+                            continue;
                         }
-                        if (pgc.productId > 0 && pgc.productCount >= 1)
-                        {
-                            int[] result = AddItem(pgc.productId, (int)pgc.productCount, 0);
-                            pf.powerSystem.genPool[i].productCount -= result[0];
-                        }
-                        continue;
-                    }
 
-                    int fuelId = 0;
-                    switch (pgc.fuelMask)
-                    {
-                        case 1:
-                            fuelId = ThermalPowerPlantFuel();
-                            break;
-                        case 2: fuelId = 1802; break;
-                        case 4:
-                            if (HasItem(1804))
-                                fuelId = 1804;
-                            else
-                                fuelId = 1803;
-                            break;
-                    }
-                    if (fuelId != pgc.fuelId && pgc.fuelCount == 0)
-                    {
-                        int[] result = TakeItem(fuelId, 5);
-                        pf.powerSystem.genPool[i].SetNewFuel(fuelId, (short)result[0], (short)result[1]);
-                    }
-                    else if (fuelId == pgc.fuelId && pgc.fuelCount < 5)
-                    {
-                        int[] result = TakeItem(fuelId, 5 - pgc.fuelCount);
-                        pf.powerSystem.genPool[i].fuelCount += (short)result[0];
-                        pf.powerSystem.genPool[i].fuelInc += (short)result[1];
+                        int fuelId = 0;
+                        switch (pgc.fuelMask)
+                        {
+                            case 1:
+                                fuelId = ThermalPowerPlantFuel();
+                                break;
+                            case 2: fuelId = 1802; break;
+                            case 4:
+                                if (HasItem(1804))
+                                    fuelId = 1804;
+                                else
+                                    fuelId = 1803;
+                                break;
+                        }
+                        if (fuelId != pgc.fuelId && pgc.fuelCount == 0)
+                        {
+                            int[] result = TakeItem(fuelId, 5);
+                            pf.powerSystem.genPool[i].SetNewFuel(fuelId, (short)result[0], (short)result[1]);
+                        }
+                        else if (fuelId == pgc.fuelId && pgc.fuelCount < 5)
+                        {
+                            int[] result = TakeItem(fuelId, 5 - pgc.fuelCount);
+                            pf.powerSystem.genPool[i].fuelCount += (short)result[0];
+                            pf.powerSystem.genPool[i].fuelInc += (short)result[1];
+                        }
                     }
                 }
+            }catch  (Exception ex)
+            {
+                Logger.LogError(ex);
             }
-            taskState["ProcessPowerGenerator"] = true;
+            finally
+            {
+                taskState["ProcessPowerGenerator"] = true;
+            }
+            
         }
 
         //能量枢纽
         void ProcessPowerExchanger(object state)
         {
             Logger.LogDebug("ProcessPowerExchanger");
-            for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
+            try
             {
-                PlanetFactory pf = GameMain.data.factories[index];
-                if (pf == null) continue;
-                for (int i = pf.powerSystem.excPool.Length - 1; i >= 0; i--)
+                for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
                 {
-                    PowerExchangerComponent pec = pf.powerSystem.excPool[i];
-                    if (pec.targetState == -1) //放电
+                    PlanetFactory pf = GameMain.data.factories[index];
+                    if (pf == null) continue;
+                    for (int i = pf.powerSystem.excPool.Length - 1; i >= 0; i--)
                     {
-                        if (pec.fullCount < 3)
+                        PowerExchangerComponent pec = pf.powerSystem.excPool[i];
+                        if (pec.targetState == -1) //放电
                         {
-                            int[] result = TakeItem(pec.fullId, 3 - pec.fullCount);
-                            pf.powerSystem.excPool[i].fullCount += (short)result[0];
+                            if (pec.fullCount < 3)
+                            {
+                                int[] result = TakeItem(pec.fullId, 3 - pec.fullCount);
+                                pf.powerSystem.excPool[i].fullCount += (short)result[0];
+                            }
+                            if (pec.emptyCount > 0)
+                            {
+                                int[] result = AddItem(pec.emptyId, pec.emptyCount, 0);
+                                pf.powerSystem.excPool[i].emptyCount -= (short)result[0];
+                            }
                         }
-                        if (pec.emptyCount > 0)
+                        else if (pec.targetState == 1) //充电
                         {
-                            int[] result = AddItem(pec.emptyId, pec.emptyCount, 0);
-                            pf.powerSystem.excPool[i].emptyCount -= (short)result[0];
-                        }
-                    }
-                    else if (pec.targetState == 1) //充电
-                    {
-                        if (pec.emptyCount < 5)
-                        {
-                            int[] result = TakeItem(pec.emptyId, 5 - pec.emptyCount);
-                            pf.powerSystem.excPool[i].emptyCount += (short)result[0];
-                        }
-                        if (pec.fullCount > 0)
-                        {
-                            int[] result = AddItem(pec.fullId, pec.fullCount, 0);
-                            pf.powerSystem.excPool[i].fullCount -= (short)result[0];
+                            if (pec.emptyCount < 5)
+                            {
+                                int[] result = TakeItem(pec.emptyId, 5 - pec.emptyCount);
+                                pf.powerSystem.excPool[i].emptyCount += (short)result[0];
+                            }
+                            if (pec.fullCount > 0)
+                            {
+                                int[] result = AddItem(pec.fullId, pec.fullCount, 0);
+                                pf.powerSystem.excPool[i].fullCount -= (short)result[0];
+                            }
                         }
                     }
                 }
+            }catch (Exception ex)
+            {
+                Logger.LogError(ex);
             }
-            taskState["ProcessPowerExchanger"] = true;
+            finally
+            {
+                taskState["ProcessPowerExchanger"] = true;
+            }
         }
 
         //火箭发射井
         void ProcessSilo(object state)
         {
             Logger.LogDebug("ProcessSilo");
-            for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
+            try
             {
-                PlanetFactory pf = GameMain.data.factories[index];
-                if (pf == null) continue;
-                for (int i = pf.factorySystem.siloPool.Length - 1; i >= 0; i--)
+                for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
                 {
-                    SiloComponent sc = pf.factorySystem.siloPool[i];
-                    if (sc.id > 0 && sc.bulletCount <= 3)
+                    PlanetFactory pf = GameMain.data.factories[index];
+                    if (pf == null) continue;
+                    for (int i = pf.factorySystem.siloPool.Length - 1; i >= 0; i--)
                     {
-                        int[] result = TakeItem(sc.bulletId, 10);
-                        pf.factorySystem.siloPool[i].bulletCount += result[0];
-                        pf.factorySystem.siloPool[i].bulletInc += result[1];
+                        SiloComponent sc = pf.factorySystem.siloPool[i];
+                        if (sc.id > 0 && sc.bulletCount <= 3)
+                        {
+                            int[] result = TakeItem(sc.bulletId, 10);
+                            pf.factorySystem.siloPool[i].bulletCount += result[0];
+                            pf.factorySystem.siloPool[i].bulletInc += result[1];
+                        }
                     }
                 }
+            }catch (Exception ex)
+            {
+                Logger.LogError(ex);
             }
-            taskState["ProcessSilo"] = true;
+            finally
+            {
+                taskState["ProcessSilo"] = true;
+            }
+
+            
         }
 
         //电磁弹射器
         void ProcessEjector(object state)
         {
             Logger.LogDebug("ProcessEjector");
-            for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
+            try
             {
-                PlanetFactory pf = GameMain.data.factories[index];
-                if (pf == null) continue;
-                for (int i = pf.factorySystem.ejectorPool.Length - 1; i >= 0; i--)
+                for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
                 {
-                    EjectorComponent ec = pf.factorySystem.ejectorPool[i];
-                    if (ec.id > 0 && ec.bulletCount <= 5)
+                    PlanetFactory pf = GameMain.data.factories[index];
+                    if (pf == null) continue;
+                    for (int i = pf.factorySystem.ejectorPool.Length - 1; i >= 0; i--)
                     {
-                        int[] result = TakeItem(ec.bulletId, 15);
-                        pf.factorySystem.ejectorPool[i].bulletCount += result[0];
-                        pf.factorySystem.ejectorPool[i].bulletInc += result[1];
+                        EjectorComponent ec = pf.factorySystem.ejectorPool[i];
+                        if (ec.id > 0 && ec.bulletCount <= 5)
+                        {
+                            int[] result = TakeItem(ec.bulletId, 15);
+                            pf.factorySystem.ejectorPool[i].bulletCount += result[0];
+                            pf.factorySystem.ejectorPool[i].bulletInc += result[1];
+                        }
                     }
                 }
+            }catch  (Exception ex)
+            {
+                Logger.LogError(ex);
             }
-            taskState["ProcessEjector"] = true;
+            finally
+            {
+                taskState["ProcessEjector"] = true;
+            }
+
+            
         }
 
         //研究站
         void ProcessLab(object state)
         {
             Logger.LogDebug("ProcessLab");
-            for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
+            try
             {
-                PlanetFactory pf = GameMain.data.factories[index];
-                if (pf == null) continue;
-                foreach (LabComponent lc in pf.factorySystem.labPool)
+                for (int index = GameMain.data.factories.Length - 1; index >= 0; index--)
                 {
-                    if (lc.id <= 0) continue;
-                    if (lc.recipeId > 0)
+                    PlanetFactory pf = GameMain.data.factories[index];
+                    if (pf == null) continue;
+                    foreach (LabComponent lc in pf.factorySystem.labPool)
                     {
-                        for (int i = lc.products.Length - 1; i >= 0; i--)
+                        if (lc.id <= 0) continue;
+                        if (lc.recipeId > 0)
                         {
-                            if (lc.produced[i] > 0)
+                            for (int i = lc.products.Length - 1; i >= 0; i--)
                             {
-                                int[] result = AddItem(lc.products[i], lc.produced[i], 0);
-                                lc.produced[i] -= result[0];
+                                if (lc.produced[i] > 0)
+                                {
+                                    int[] result = AddItem(lc.products[i], lc.produced[i], 0);
+                                    lc.produced[i] -= result[0];
+                                }
+                            }
+                            for (int i = lc.requires.Length - 1; i >= 0; i--)
+                            {
+                                int expectCount = lc.requireCounts[i] * 3 - lc.served[i] - lc.incServed[i];
+                                int[] result = TakeItem(lc.requires[i], expectCount);
+                                lc.served[i] += result[0];
+                                lc.incServed[i] += result[1];
                             }
                         }
-                        for (int i = lc.requires.Length - 1; i >= 0; i--)
+                        else if (lc.researchMode == true)
                         {
-                            int expectCount = lc.requireCounts[i] * 3 - lc.served[i] - lc.incServed[i];
-                            int[] result = TakeItem(lc.requires[i], expectCount);
-                            lc.served[i] += result[0];
-                            lc.incServed[i] += result[1];
-                        }
-                    }
-                    else if (lc.researchMode == true)
-                    {
-                        for (int i = lc.matrixPoints.Length - 1; i >= 0; i--)
-                        {
-                            if (lc.matrixPoints[i] <= 0) continue;
-                            if (lc.matrixServed[i] >= lc.matrixPoints[i] * 3600) continue;
-                            int[] result = TakeItem(LabComponent.matrixIds[i], lc.matrixPoints[i]);
-                            lc.matrixServed[i] += result[0] * 3600;
-                            lc.matrixIncServed[i] += result[1] * 3600;
+                            for (int i = lc.matrixPoints.Length - 1; i >= 0; i--)
+                            {
+                                if (lc.matrixPoints[i] <= 0) continue;
+                                if (lc.matrixServed[i] >= lc.matrixPoints[i] * 3600) continue;
+                                int[] result = TakeItem(LabComponent.matrixIds[i], lc.matrixPoints[i]);
+                                lc.matrixServed[i] += result[0] * 3600;
+                                lc.matrixIncServed[i] += result[1] * 3600;
+                            }
                         }
                     }
                 }
+            }catch(Exception ex)
+            {
+                Logger.LogError(ex);
             }
-            taskState["ProcessLab"] = true;
+            finally
+            {
+                taskState["ProcessLab"] = true;
+            }
         }
 
         // 高斯机枪塔,导弹防御塔，聚爆加农炮，磁化电浆炮
         void ProcessTurret(object state)
         {
             Logger.LogDebug("ProcessTurret");
-            for (int pIndex = GameMain.data.factories.Length - 1; pIndex >= 0; pIndex--)
+            try
             {
-                PlanetFactory pf = GameMain.data.factories[pIndex];
-                if (pf == null) continue;
-                for (int index = pf.defenseSystem.turrets.buffer.Length - 1; index >= 0; index--)
+                for (int pIndex = GameMain.data.factories.Length - 1; pIndex >= 0; pIndex--)
                 {
-                    TurretComponent tc = pf.defenseSystem.turrets.buffer[index];
-                    if (tc.id == 0 || tc.type == ETurretType.Laser || tc.ammoType == EAmmoType.None || tc.itemCount > 0 || tc.bulletCount > 0) continue;
-                    foreach (int itemId in ammos[tc.ammoType])
+                    PlanetFactory pf = GameMain.data.factories[pIndex];
+                    if (pf == null) continue;
+                    for (int index = pf.defenseSystem.turrets.buffer.Length - 1; index >= 0; index--)
                     {
-                        int[] result = TakeItem(itemId, 50 - tc.itemCount);
-                        if (result[0] != 0)
+                        TurretComponent tc = pf.defenseSystem.turrets.buffer[index];
+                        if (tc.id == 0 || tc.type == ETurretType.Laser || tc.ammoType == EAmmoType.None || tc.itemCount > 0 || tc.bulletCount > 0) continue;
+                        foreach (int itemId in ammos[tc.ammoType])
                         {
-                            pf.defenseSystem.turrets.buffer[index].SetNewItem(itemId, (short)result[0], (short)result[1]);
-                            break;
+                            int[] result = TakeItem(itemId, 50 - tc.itemCount);
+                            if (result[0] != 0)
+                            {
+                                pf.defenseSystem.turrets.buffer[index].SetNewItem(itemId, (short)result[0], (short)result[1]);
+                                break;
+                            }
                         }
                     }
                 }
+            }catch (Exception ex)
+            {
+                Logger.LogError(ex);
             }
-            taskState["ProcessTurret"] = true;
+            finally
+            {
+                taskState["ProcessTurret"] = true;
+            }
+           
         }
 
         // 战场分析基站
         void ProcessBattleBase(object state)
         {
             Logger.LogDebug("ProcessBattleBase");
-            int[] fighters = { 5103, 5102, 5101 };
-            for (int pIndex = GameMain.data.factories.Length - 1; pIndex >= 0; pIndex--)
+            try
             {
-                PlanetFactory pf = GameMain.data.factories[pIndex];
-                if (pf == null) continue;
-                for (int bIndex = pf.defenseSystem.battleBases.buffer.Length - 1; bIndex >= 0; bIndex--)
+                int[] fighters = { 5103, 5102, 5101 };
+                for (int pIndex = GameMain.data.factories.Length - 1; pIndex >= 0; pIndex--)
                 {
-                    BattleBaseComponent bbc = pf.defenseSystem.battleBases.buffer[bIndex];
-                    if (bbc == null) continue;
-
-                    //添加战斗无人机，优先添加高级别无人机
-                    ModuleFleet fleet = bbc.combatModule.moduleFleets[0];
-                    for (int index = fleet.fighters.Length - 1; index >= 0; index--)
+                    PlanetFactory pf = GameMain.data.factories[pIndex];
+                    if (pf == null) continue;
+                    for (int bIndex = pf.defenseSystem.battleBases.buffer.Length - 1; bIndex >= 0; bIndex--)
                     {
-                        ModuleFighter fighter = fleet.fighters[index];
-                        if (fighter.count == 0)
+                        BattleBaseComponent bbc = pf.defenseSystem.battleBases.buffer[bIndex];
+                        if (bbc == null || bbc.combatModule == null) continue;
+                        //添加战斗无人机，优先添加高级别无人机
+                        ModuleFleet fleet = bbc.combatModule.moduleFleets[0];
+                        for (int index = fleet.fighters.Length - 1; index >= 0; index--)
                         {
-                            foreach (int itemId in fighters)
+                            ModuleFighter fighter = fleet.fighters[index];
+                            if (fighter.count == 0)
                             {
-                                int[] result = TakeItem(itemId, 1);
-                                if (result[0] != 0)
+                                foreach (int itemId in fighters)
                                 {
-                                    fleet.AddFighterToPort(index, itemId);
-                                    break;
+                                    int[] result = TakeItem(itemId, 1);
+                                    if (result[0] != 0)
+                                    {
+                                        fleet.AddFighterToPort(index, itemId);
+                                        break;
+                                    }
                                 }
                             }
                         }
-                    }
-
-                    //回收物品
-                    if (useStorege.Value) continue;
-                    StorageComponent sc = bbc.storage;
-                    if (sc.isEmpty) continue;
-                    for (int i = sc.grids.Length - 1; i >= 0; i--)
-                    {
-                        StorageComponent.GRID grid = sc.grids[i];
-                        if (grid.itemId <= 0 || grid.count <= 0) continue;
-                        int[] result = AddItem(grid.itemId, grid.count, grid.inc, false);
-                        if (result[0] != 0)
+                        //回收物品
+                        if (useStorege.Value) continue;
+                        StorageComponent sc = bbc.storage;
+                        if (sc.isEmpty) continue;
+                        for (int i = sc.grids.Length - 1; i >= 0; i--)
                         {
-                            sc.grids[i].count -= result[0];
-                            sc.grids[i].inc -= result[1];
-                            if (sc.grids[i].count <= 0)
+                            StorageComponent.GRID grid = sc.grids[i];
+                            if (grid.itemId <= 0 || grid.count <= 0) continue;
+                            int[] result = AddItem(grid.itemId, grid.count, grid.inc, false);
+                            if (result[0] != 0)
                             {
-                                sc.grids[i].itemId = sc.grids[i].filter;
+                                sc.grids[i].count -= result[0];
+                                sc.grids[i].inc -= result[1];
+                                if (sc.grids[i].count <= 0)
+                                {
+                                    sc.grids[i].itemId = sc.grids[i].filter;
+                                }
                             }
                         }
-                    }
-                    sc.NotifyStorageChange();
+                        sc.NotifyStorageChange();
 
+                    }
                 }
+            }catch (Exception ex)
+            {
+                Logger.LogError(ex);
             }
 
             taskState["ProcessBattleBase"] = true;
@@ -1211,28 +1313,35 @@ namespace PackageLogistic
         void ProcessPackage(object state)
         {
             Logger.LogDebug("ProcessPackage");
-            bool changed = false;
-            StorageComponent package = GameMain.mainPlayer.package;
-            for (int index = package.grids.Length - 1; index >= 0; index--)
+            try
             {
-                StorageComponent.GRID grid = package.grids[index];
-                if (grid.filter != 0 && grid.count < grid.stackSize)
+                bool changed = false;
+                StorageComponent package = GameMain.mainPlayer.package;
+                for (int index = package.grids.Length - 1; index >= 0; index--)
                 {
-                    int[] result = TakeItem(grid.itemId, grid.stackSize - grid.count);
-                    if (result[0] != 0)
+                    StorageComponent.GRID grid = package.grids[index];
+                    if (grid.filter != 0 && grid.count < grid.stackSize)
                     {
-                        package.grids[index].count += result[0];
-                        package.grids[index].inc += result[1];
-                        changed = true;
+                        int[] result = TakeItem(grid.itemId, grid.stackSize - grid.count);
+                        if (result[0] != 0)
+                        {
+                            package.grids[index].count += result[0];
+                            package.grids[index].inc += result[1];
+                            changed = true;
+                        }
                     }
                 }
-            }
-            if (changed)
+                if (changed)
+                {
+                    package.NotifyStorageChange();
+                }
+            }catch (Exception ex)
             {
-                package.NotifyStorageChange();
+                Logger.LogError(ex);
+            }finally
+            {
+                taskState["ProcessPackage"] = true;
             }
-
-            taskState["ProcessPackage"] = true;
         }
 
 

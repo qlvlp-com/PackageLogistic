@@ -17,6 +17,9 @@ https://dsp.thunderstore.io/package/qlvlp/PackageLogistic/
  https://www.bilibili.com/video/BV1Ye411k7Ws/?share_source=copy_web&vd_source=e98c885722228bac750b1f4747eee0c2
 
 ## 版本
+### version 1.1.0
+1. 修复BUG：战场分析基站被摧毁标记重建时出现的空指针异常。
+
 ### version 1.0.9
 1. 修复BUG：启用物流背包和星际运输站物品可以向伊卡洛斯物品清单格子补充物品功能时，低概率造成物品清单格子中物品丢失。
 
