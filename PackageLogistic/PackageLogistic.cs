@@ -43,6 +43,8 @@ namespace PackageLogistic
         private ConfigEntry<KeyboardShortcut> hotKey;
         private ConfigEntry<Boolean> enableMod;
         private ConfigEntry<Boolean> autoReplenishPackage;
+        private ConfigEntry<Boolean> useTransport;
+        
 
         private DeliveryPackage deliveryPackage;
         private Dictionary<int, int> deliveryPackageItems = new Dictionary<int, int>(); //<itemId,deliveryPackage.grids Index>
@@ -85,6 +87,7 @@ namespace PackageLogistic
             infBuildings = Config.Bind<Boolean>("配置", "InfBuildings", false, "无限建筑。物流背包内所有建筑无限数量");
             infSand = Config.Bind<Boolean>("配置", "InfSand", false, "无限沙土。沙土无限数量（固定为1G）");
             useStorege = Config.Bind<Boolean>("配置", "useStorege", true, "从储物箱和储液罐回收物品");
+            useTransport = Config.Bind<Boolean>("配置", "useTransport", true, "Use galactic transport network");
             fuelId = Config.Bind<int>("配置", "fuelId", 0, "火力发电站燃料ID\n" +
                 "0:自动选择，精炼油和氢储量超60%时，谁多使用谁，否则使用煤，可防止原油裂解反应阻塞\n" +
                 "1006:煤, 1109:石墨, 1007:原油, 1114:精炼油, 1120:氢气, 1801:氢燃料棒, 1011:可燃冰\n" +
@@ -140,7 +143,11 @@ namespace PackageLogistic
 
                             deliveryPackage = GameMain.mainPlayer.deliveryPackage;
                             CreateDeliveryPackageItemIndex();
-                            CreateTransportItemIndex();
+                            if (useTransport.Value)
+                            {
+                                CreateTransportItemIndex();
+                            }
+
                             CheckTech();
 
                             taskState["ProcessTransport"] = false;
