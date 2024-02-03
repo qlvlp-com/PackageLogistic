@@ -1,10 +1,10 @@
+C:\Users\qlvlp\AppData\Roaming\r2modmanPlus-local\DysonSphereProgram\profiles\Default\BepInEx\plugins\qlvlp-PackageLogistic\PackageLogistic.dll
+C:\Users\qlvlp\AppData\Roaming\r2modmanPlus-local\DysonSphereProgram\profiles\Default\BepInEx\plugins\qlvlp-PackageLogistic\PackageLogistic.pdb
+D:\projects\PackageLogistic\PackageLogistic.dll
+D:\projects\PackageLogistic\PackageLogistic.pdb
 C:\Program Files (x86)\Steam\steamapps\common\Dyson Sphere Program\BepInEx\plugins\PackageLogistic.dll
 C:\Program Files (x86)\Steam\steamapps\common\Dyson Sphere Program\BepInEx\plugins\PackageLogistic.pdb
 D:\projects\PackageLogistic\obj\Release\PackageLogistic.csproj.AssemblyReference.cache
 D:\projects\PackageLogistic\obj\Release\PackageLogistic.csproj.CoreCompileInputs.cache
 D:\projects\PackageLogistic\obj\Release\PackageLogistic.dll
 D:\projects\PackageLogistic\obj\Release\PackageLogistic.pdb
-C:\Users\qlvlp\AppData\Roaming\r2modmanPlus-local\DysonSphereProgram\profiles\Default\BepInEx\plugins\qlvlp-PackageLogistic\PackageLogistic.dll
-C:\Users\qlvlp\AppData\Roaming\r2modmanPlus-local\DysonSphereProgram\profiles\Default\BepInEx\plugins\qlvlp-PackageLogistic\PackageLogistic.pdb
-D:\projects\PackageLogistic\PackageLogistic.dll
-D:\projects\PackageLogistic\PackageLogistic.pdb

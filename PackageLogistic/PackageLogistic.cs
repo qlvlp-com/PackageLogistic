@@ -31,7 +31,7 @@ namespace PackageLogistic
     {
         public const string GUID = "com.qlvlp.dsp.PackageLogistic";
         public const string NAME = "PackageLogistic";
-        public const string VERSION = "1.0.8";
+        public const string VERSION = "1.1.3";
 
         private ConfigEntry<Boolean> autoSpray;
         private ConfigEntry<Boolean> costProliferator;
@@ -43,6 +43,7 @@ namespace PackageLogistic
         private ConfigEntry<KeyboardShortcut> hotKey;
         private ConfigEntry<Boolean> enableMod;
         private ConfigEntry<Boolean> autoReplenishPackage;
+        private ConfigEntry<Boolean> autoReplenishTPPFuel;
 
         private DeliveryPackage deliveryPackage;
         private Dictionary<int, int> deliveryPackageItems = new Dictionary<int, int>(); //<itemId,deliveryPackage.grids Index>
@@ -61,7 +62,7 @@ namespace PackageLogistic
         private const float hydrogenThreshold = 0.6f;
 
         private bool showGUI = false;
-        private Rect windowRect = new Rect(700, 250, 500, 370);
+        private Rect windowRect = new Rect(700, 250, 500, 400);
         private readonly Texture2D windowTexture = new Texture2D(10, 10);
         private int selectedPanel = 0;
 
@@ -77,14 +78,16 @@ namespace PackageLogistic
         {
             hotKey = Config.Bind("窗口快捷键", "Key", new KeyboardShortcut(KeyCode.L, KeyCode.LeftControl));
             enableMod = Config.Bind<Boolean>("配置", "EnableMod", true, "启用MOD");
-            autoReplenishPackage = Config.Bind<Boolean>("配置", "autoReplenishPackage", true, "自动补充伊卡洛斯物品清单中开启过滤的物品");
-            autoSpray = Config.Bind<Boolean>("配置", "AutoSpray", true, "自动喷涂。自动使用物流背包里的增产剂对物流背包内的其它物品进行喷涂");
-            costProliferator = Config.Bind<Boolean>("配置", "CostProliferator", true, "消耗增产剂。自动喷涂时消耗背包里的增产剂");
-            infItems = Config.Bind<Boolean>("配置", "InfItems", false, "无限物品。物流背包内所有物品无限数量（无法获取成就）");
-            infVeins = Config.Bind<Boolean>("配置", "InfVeins", false, "无限矿物。物流背包内所有矿物无限数量");
-            infBuildings = Config.Bind<Boolean>("配置", "InfBuildings", false, "无限建筑。物流背包内所有建筑无限数量");
+            autoReplenishPackage = Config.Bind<Boolean>("配置", "autoReplenishPackage", true, "自动补充背包中开启过滤的物品（鼠标中键点击格子即可开启过滤）");
+            autoSpray = Config.Bind<Boolean>("配置", "AutoSpray", true, "自动喷涂。自动对物流背包和星际运输站内的其它物品进行喷涂");
+            costProliferator = Config.Bind<Boolean>("配置", "CostProliferator", true, "消耗增产剂。自动喷涂时消耗背包或星际物流站里的增产剂");
+            infItems = Config.Bind<Boolean>("配置", "InfItems", false, "无限物品。物流背包和星际运输站内所有物品无限数量（无法获取成就）");
+            infVeins = Config.Bind<Boolean>("配置", "InfVeins", false, "无限矿物。物流背包和星际运输站内所有矿物无限数量");
+            infBuildings = Config.Bind<Boolean>("配置", "InfBuildings", false, "无限建筑。物流背包和星际运输站内所有建筑无限数量");
             infSand = Config.Bind<Boolean>("配置", "InfSand", false, "无限沙土。沙土无限数量（固定为1G）");
             useStorege = Config.Bind<Boolean>("配置", "useStorege", true, "从储物箱和储液罐回收物品");
+
+            autoReplenishTPPFuel = Config.Bind<Boolean>("配置", "autoReplenishTPPFuel", true, "自动为火力发电站补充燃料");
             fuelId = Config.Bind<int>("配置", "fuelId", 0, "火力发电站燃料ID\n" +
                 "0:自动选择，精炼油和氢储量超60%时，谁多使用谁，否则使用煤，可防止原油裂解反应阻塞\n" +
                 "1006:煤, 1109:石墨, 1007:原油, 1114:精炼油, 1120:氢气, 1801:氢燃料棒, 1011:可燃冰\n" +
@@ -111,11 +114,12 @@ namespace PackageLogistic
             windowTexture.Apply();
 
             infAmmo = Config.Bind<Boolean>("配置", "InfAmmo", false, "无限弹药。物流背包和星际运输站内弹药无限数量");
-            infFleet = Config.Bind<Boolean>("配置", "infFleet", false, "无限舰队。物流背包和星际运输站内无人机与舰艇无限数量");
+            infFleet = Config.Bind<Boolean>("配置", "infFleet", false, "无限舰队。物流背包和星际运输站内无人机与战舰无限数量");
             ammos.Add(EAmmoType.Bullet, new List<int> { 1603, 1602, 1601 });
             ammos.Add(EAmmoType.Missile, new List<int> { 1611, 1610, 1609 });
             ammos.Add(EAmmoType.Cannon, new List<int> { 1606, 1605, 1604 });
             ammos.Add(EAmmoType.Plasma, new List<int> { 1608, 1607 });
+            ammos.Add(EAmmoType.EMCapsule, new List<int> { 1613, 1612 });
 
             new Thread(() =>
             {
@@ -130,7 +134,7 @@ namespace PackageLogistic
                             Logger.LogInfo("Game is not running!");
                             continue;
                         }
-                        
+
                         if (enableMod.Value)
                         {
                             if (infSand.Value && GameMain.mainPlayer.sandCount != 1000000000)
@@ -262,11 +266,11 @@ namespace PackageLogistic
             enableMod.Value = GUILayout.Toggle(enableMod.Value, "启用MOD");
 
             GUILayout.Space(10);
-            GUILayout.Label("自动补充伊卡洛斯物品清单中开启过滤的物品");
+            GUILayout.Label("自动补充背包中开启过滤的物品");
             autoReplenishPackage.Value = GUILayout.Toggle(autoReplenishPackage.Value, "自动补充");
 
             GUILayout.Space(15);
-            GUILayout.Label("自动使用物流背包里的增产剂对物流背包内的其它物品进行喷涂");
+            GUILayout.Label("自动对物流背包和星际运输站内的其它物品进行喷涂");
             GUILayout.BeginHorizontal();
             autoSpray.Value = GUILayout.Toggle(autoSpray.Value, "自动喷涂");
             costProliferator.Value = GUILayout.Toggle(costProliferator.Value, "消耗增产剂");
@@ -276,9 +280,12 @@ namespace PackageLogistic
             useStorege.Value = GUILayout.Toggle(useStorege.Value, "从储物箱和储液罐回收物品");
 
             GUILayout.Space(15);
-            GUILayout.Label("火力发电站燃料");
-            selectedFuelIndex = GUILayout.SelectionGrid(selectedFuelIndex, fuelOptions.Values.ToArray(), 4, GUI.skin.toggle);
-            fuelId.Value = fuelOptions.Keys.ToArray()[selectedFuelIndex];
+            autoReplenishTPPFuel.Value = GUILayout.Toggle(autoReplenishTPPFuel.Value, "自动为火力发电厂补充燃料");
+            if (autoReplenishTPPFuel.Value)
+            {
+                selectedFuelIndex = GUILayout.SelectionGrid(selectedFuelIndex, fuelOptions.Values.ToArray(), 4, GUI.skin.toggle);
+                fuelId.Value = fuelOptions.Keys.ToArray()[selectedFuelIndex];
+            }
 
             GUILayout.Space(5);
             GUILayout.EndVertical();
@@ -317,9 +324,13 @@ namespace PackageLogistic
             infAmmo.Value = GUILayout.Toggle(infAmmo.Value, "无限弹药");
 
             GUILayout.Space(15);
-            GUILayout.Label("物流背包和星际运输站内无人机与舰艇无限数量");
+            GUILayout.Label("物流背包和星际运输站内无人机与战舰无限数量");
             infFleet.Value = GUILayout.Toggle(infFleet.Value, "无限舰队");
 
+            GUILayout.Space(15);
+            if(GUILayout.Button(new GUIContent("清理战场分析基站", "设置不掉落的物品将被丢弃"), GUILayout.Width(150))) {
+                ClearBattleBase();
+            }
             GUILayout.Space(5);
             GUILayout.EndVertical();
         }
@@ -327,12 +338,13 @@ namespace PackageLogistic
         void CheckTech()
         {
             Logger.LogDebug("CheckTech");
-            if (GameMain.history.TechUnlocked(2304) && deliveryPackage.colCount < 5)
+
+            if (GameMain.history.TechUnlocked(2307) && deliveryPackage.colCount < 5)
             {
                 deliveryPackage.colCount = 5;
                 deliveryPackage.NotifySizeChange();
             }
-            else if (GameMain.history.TechUnlocked(1608) && deliveryPackage.colCount < 4)
+            else if (GameMain.history.TechUnlocked(2304) && deliveryPackage.colCount < 4)
             {
                 deliveryPackage.colCount = 4;
                 deliveryPackage.NotifySizeChange();
@@ -345,48 +357,55 @@ namespace PackageLogistic
                 deliveryPackage.NotifySizeChange();
             }
 
-            if (GameMain.history.TechUnlocked(2306))
+            if (GameMain.history.TechUnlocked(2307))
             {
                 stackSize = 5000;
                 if (GameMain.mainPlayer.package.size < 160)
                     GameMain.mainPlayer.package.SetSize(160);
 
             }
-            else if (GameMain.history.TechUnlocked(2305))
+            else if (GameMain.history.TechUnlocked(2306))
             {
                 stackSize = 4000;
+                if (GameMain.mainPlayer.package.size < 150)
+                    GameMain.mainPlayer.package.SetSize(150);
+
+            }
+            else if (GameMain.history.TechUnlocked(2305))
+            {
+                stackSize = 3000;
                 if (GameMain.mainPlayer.package.size < 140)
                     GameMain.mainPlayer.package.SetSize(140);
             }
             else if (GameMain.history.TechUnlocked(2304))
             {
-                stackSize = 3000;
-                if (GameMain.mainPlayer.package.size < 120)
-                    GameMain.mainPlayer.package.SetSize(120);
+                stackSize = 2000;
+                if (GameMain.mainPlayer.package.size < 130)
+                    GameMain.mainPlayer.package.SetSize(130);
             }
             else if (GameMain.history.TechUnlocked(2303))
             {
-                stackSize = 2000;
-                if (GameMain.mainPlayer.package.size < 110)
-                    GameMain.mainPlayer.package.SetSize(110);
+                stackSize = 1000;
+                if (GameMain.mainPlayer.package.size < 120)
+                    GameMain.mainPlayer.package.SetSize(120);
             }
             else if (GameMain.history.TechUnlocked(2302))
             {
-                stackSize = 1000;
-                if (GameMain.mainPlayer.package.size < 100)
-                    GameMain.mainPlayer.package.SetSize(100);
+                stackSize = 500;
+                if (GameMain.mainPlayer.package.size < 110)
+                    GameMain.mainPlayer.package.SetSize(110);
             }
             else if (GameMain.history.TechUnlocked(2301))
             {
-                stackSize = 500;
-                if (GameMain.mainPlayer.package.size < 90)
-                    GameMain.mainPlayer.package.SetSize(90);
+                stackSize = 400;
+                if (GameMain.mainPlayer.package.size < 100)
+                    GameMain.mainPlayer.package.SetSize(100);
             }
             else
             {
                 stackSize = 300;
-                if (GameMain.mainPlayer.package.size < 80)
-                    GameMain.mainPlayer.package.SetSize(80);
+                if (GameMain.mainPlayer.package.size < 90)
+                    GameMain.mainPlayer.package.SetSize(90);
             }
 
             if (GameMain.history.TechUnlocked(3510))
@@ -487,7 +506,7 @@ namespace PackageLogistic
                             {
                                 sc.storage[storageIndex].max = Math.Min(item.StackSize * 10, ss.max);
                             }
-                            
+
                             if (infItems.Value)  // 无限物品模式
                             {
                                 sc.storage[storageIndex].count = ss.max;
@@ -581,14 +600,14 @@ namespace PackageLogistic
                 deliveryPackage.grids[index].inc = deliveryPackage.grids[index].count * 4;
                 return;
             }
+            ItemProto item = LDB.items.Select(grid.itemId);
+            if (item.CanBuild || item.isFighter)
+                return;
             if (!costProliferator.Value && grid.inc < grid.count * 4)
             {
                 deliveryPackage.grids[index].inc = grid.count * 4;
                 return;
             }
-            ItemProto item = LDB.items.Select(grid.itemId);
-            if (item.CanBuild)
-                return;
 
             foreach (var proliferator in proliferators)
             {
@@ -621,14 +640,14 @@ namespace PackageLogistic
                 sc.storage[store.storageIndex].inc = ss.count * 4;
                 return;
             }
+            ItemProto item = LDB.items.Select(ss.itemId);
+            if (item.CanBuild || item.isFighter)
+                return;
             if (!costProliferator.Value && ss.inc < ss.count * 4)
             {
                 sc.storage[store.storageIndex].inc = ss.count * 4;
                 return;
             }
-            ItemProto item = LDB.items.Select(ss.itemId);
-            if (item.CanBuild)
-                return;
 
             foreach (var proliferator in proliferators)
             {
@@ -724,7 +743,8 @@ namespace PackageLogistic
 
                     }
                 }
-            }catch (Exception ex)
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex);
             }
@@ -732,7 +752,7 @@ namespace PackageLogistic
             {
                 taskState["ProcessTransport"] = true;
             }
-            
+
         }
 
 
@@ -785,7 +805,8 @@ namespace PackageLogistic
                     }
 
                 }
-            }catch (Exception ex)
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex);
             }
@@ -793,7 +814,7 @@ namespace PackageLogistic
             {
                 taskState["ProcessStorage"] = true;
             }
-            
+
         }
 
 
@@ -827,7 +848,8 @@ namespace PackageLogistic
                         }
                     }
                 }
-            }catch(Exception ex)
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex);
             }
@@ -835,7 +857,7 @@ namespace PackageLogistic
             {
                 taskState["ProcessAssembler"] = true;
             }
-            
+
         }
 
 
@@ -887,7 +909,8 @@ namespace PackageLogistic
                     }
                 }
 
-            }catch (Exception ex)
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex);
             }
@@ -1000,7 +1023,10 @@ namespace PackageLogistic
                         switch (pgc.fuelMask)
                         {
                             case 1:
-                                fuelId = ThermalPowerPlantFuel();
+                                if (autoReplenishTPPFuel.Value)
+                                {
+                                    fuelId = ThermalPowerPlantFuel();
+                                }
                                 break;
                             case 2: fuelId = 1802; break;
                             case 4:
@@ -1009,6 +1035,10 @@ namespace PackageLogistic
                                 else
                                     fuelId = 1803;
                                 break;
+                        }
+                        if(fuelId == 0)
+                        {
+                            continue;
                         }
                         if (fuelId != pgc.fuelId && pgc.fuelCount == 0)
                         {
@@ -1023,7 +1053,8 @@ namespace PackageLogistic
                         }
                     }
                 }
-            }catch  (Exception ex)
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex);
             }
@@ -1031,7 +1062,7 @@ namespace PackageLogistic
             {
                 taskState["ProcessPowerGenerator"] = true;
             }
-            
+
         }
 
         //能量枢纽
@@ -1075,7 +1106,8 @@ namespace PackageLogistic
                         }
                     }
                 }
-            }catch (Exception ex)
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex);
             }
@@ -1106,7 +1138,8 @@ namespace PackageLogistic
                         }
                     }
                 }
-            }catch (Exception ex)
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex);
             }
@@ -1115,7 +1148,7 @@ namespace PackageLogistic
                 taskState["ProcessSilo"] = true;
             }
 
-            
+
         }
 
         //电磁弹射器
@@ -1139,7 +1172,8 @@ namespace PackageLogistic
                         }
                     }
                 }
-            }catch  (Exception ex)
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex);
             }
@@ -1148,7 +1182,7 @@ namespace PackageLogistic
                 taskState["ProcessEjector"] = true;
             }
 
-            
+
         }
 
         //研究站
@@ -1195,7 +1229,8 @@ namespace PackageLogistic
                         }
                     }
                 }
-            }catch(Exception ex)
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex);
             }
@@ -1230,7 +1265,8 @@ namespace PackageLogistic
                         }
                     }
                 }
-            }catch (Exception ex)
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex);
             }
@@ -1238,7 +1274,7 @@ namespace PackageLogistic
             {
                 taskState["ProcessTurret"] = true;
             }
-           
+
         }
 
         // 战场分析基站
@@ -1297,12 +1333,50 @@ namespace PackageLogistic
 
                     }
                 }
-            }catch (Exception ex)
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex);
             }
 
             taskState["ProcessBattleBase"] = true;
+        }
+
+        // 清理战场分析基站
+        void ClearBattleBase()
+        {
+            Logger.LogDebug("ClearBattleBase");
+            try
+            {
+                var bans = GameMain.data.trashSystem.enemyDropBans;
+                for (int pIndex = GameMain.data.factories.Length - 1; pIndex >= 0; pIndex--)
+                {
+                    PlanetFactory pf = GameMain.data.factories[pIndex];
+                    if (pf == null) continue;
+                    for (int bIndex = pf.defenseSystem.battleBases.buffer.Length - 1; bIndex >= 0; bIndex--)
+                    {
+                        BattleBaseComponent bbc = pf.defenseSystem.battleBases.buffer[bIndex];
+                        if (bbc == null || bbc.storage == null) continue;
+                        StorageComponent sc = bbc.storage;
+                        if (sc.isEmpty) continue;
+                        for (int i = sc.grids.Length - 1; i >= 0; i--)
+                        {
+                            StorageComponent.GRID grid = sc.grids[i];
+                            if (bans.Contains(grid.itemId))
+                            {
+                                sc.grids[i].count = 0;
+                                sc.grids[i].inc = 0;
+                                sc.grids[i].itemId = sc.grids[i].filter;
+                            }
+                        }
+                        sc.NotifyStorageChange();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex);
+            }
         }
 
 
@@ -1335,10 +1409,12 @@ namespace PackageLogistic
                 {
                     package.NotifyStorageChange();
                 }
-            }catch (Exception ex)
+            }
+            catch (Exception ex)
             {
                 Logger.LogError(ex);
-            }finally
+            }
+            finally
             {
                 taskState["ProcessPackage"] = true;
             }

@@ -1,5 +1,6 @@
 # PackageLogistic
-本mod旨在通过物流背包和星际物流运输站来提供物品收发能力，减少传送带和分拣器的使用，这在一定程度上减少了游戏性，建议通关一次后再使用本mod。
+通过物流背包和星际物流运输站提供物品收发能力。自动为各类生产、能源、战斗、科研等建筑提供原料并自动从采集、生产、仓储、科研等建筑回收产品。
+极大地减少了传送带和分拣器的使用。提高了游戏性能，降低了游戏难度。
 
 ## 快捷键
 ctrl+L
@@ -7,8 +8,7 @@ ctrl+L
 ## 获取方式
 ### 【github】
 https://github.com/qlvlp-com/PackageLogistic
-### 【百度网盘】
-https://pan.baidu.com/s/1GoVky8FkgsrVaxNZJ3E2Mg?pwd=g3sp
+
 ### 【thunderstore】
 https://dsp.thunderstore.io/package/qlvlp/PackageLogistic/
 
@@ -17,6 +17,17 @@ https://dsp.thunderstore.io/package/qlvlp/PackageLogistic/
  https://www.bilibili.com/video/BV1Ye411k7Ws/?share_source=copy_web&vd_source=e98c885722228bac750b1f4747eee0c2
 
 ## 版本
+### version 1.1.3
+1.  适配版本0.10.29.21904
+
+### version 1.1.2
+1.  建筑和战舰将不再自动喷涂增产剂
+2. 新增清理战场分析基站内禁止掉落的物品功能
+
+### version 1.1.1
+1.  调整MOD设置UI以适配不同分辨率
+2. 增加“自动为火力发电厂补充燃料”设置开关
+
 ### version 1.1.0
 1. 修复BUG：战场分析基站被摧毁标记重建时出现的空指针异常。
 
